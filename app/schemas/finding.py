@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Severity = Literal["low", "medium", "high", "critical"]
-FindingStatus = Literal["draft", "pending_review", "final"]
+FindingStatus = Literal["draft", "pending_review", "final", "rejected"]
 
 HIGH_RISK_SEVERITIES: tuple[str, ...] = ("high", "critical")
 

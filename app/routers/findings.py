@@ -12,6 +12,16 @@ Reglas de negocio críticas aplicadas acá (ver `.ai/skills/audit-domain-rules/S
    siempre el servidor, nunca el cliente, al momento de la aprobación.
 3. Nunca se expone un DELETE físico. "Eliminar" es `PATCH` con `superseded_by=<new_id>`,
    que preserva el registro original (`id`, `created_at`, contenido) intacto.
+4. `status=rejected` (spec-006, botón "reject" de chainlit-ui) es un estado terminal
+   distinto de `final`: NO requiere `approved_by`/`approved_at` (esos campos documentan
+   quién *aprobó* un hallazgo `final`, no quién lo rechazó). Si además querés registrar
+   quién rechazó, reusá `approved_by` mandándolo explícitamente en el mismo PATCH — el
+   campo no se renombra para evitar una migración; queda "sin poblar" si el caller no lo
+   manda, lo cual es válido. El router no implementa una máquina de estados explícita para
+   `status` (ninguna transición previa la tenía tampoco, ver punto 2): revertir un
+   `rejected` es responsabilidad del caller vía un nuevo `PATCH status=...`, y "deshacer"
+   un rechazo en el sentido de auditoría (spec-004, append-only) se hace creando un nuevo
+   `Finding` y usando `superseded_by`, no reescribiendo el status del original.
 """
 
 from datetime import datetime, timezone
@@ -151,6 +161,8 @@ def patch_finding(
 
     if payload.status is not None:
         new_status = payload.status
+        # Solo la transición a "final" en severidades altas exige approved_by (spec-006).
+        # "rejected" es un estado terminal distinto: no pasa por esta puerta (ver docstring).
         requires_approval = new_status == "final" and finding.severity in HIGH_RISK_SEVERITIES
         approved_by = payload.approved_by or finding.approved_by
 
