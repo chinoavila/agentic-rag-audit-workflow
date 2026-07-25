@@ -58,6 +58,7 @@ embeddings_cache/
 # === Datos de auditoría generados localmente ===
 # Evidencia subida, reportes generados y blob storage emulado en dev.
 # Nunca deben viajar al repo: pueden contener información sensible del cliente auditado.
+docs/references
 data/
 uploads/
 storage/

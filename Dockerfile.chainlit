@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies (cleanup via apt-get)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends gcc curl \
+    && apt-get clean \
+    && apt-get autoclean
+
+# Copy pyproject.toml and install Python dependencies via docker image build
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e . # docker image build
+
+# Copy Chainlit UI code
+COPY chainlit_ui/ ./chainlit_ui/
+
+# Create .chainlit config directory
+RUN mkdir -p /app/.chainlit
+
+# Expose port (Chainlit default: 8000, but we use 8001 to avoid conflict with backend)
+EXPOSE 8001
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8001/health || exit 1
+
+# Run Chainlit UI
+CMD ["chainlit", "run", "chainlit_ui/app.py", "--host", "0.0.0.0", "--port", "8001"]

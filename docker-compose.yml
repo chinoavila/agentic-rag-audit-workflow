@@ -1,0 +1,75 @@
+version: "3.9"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    container_name: audit-workflow-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - CHROMA_PERSIST_DIR=/data/chroma
+      - DATABASE_URL=sqlite:////data/audit_trail.db
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - chroma_data:/data/chroma
+      - sqlite_data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health').read()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    networks:
+      - audit-network
+    restart: unless-stopped
+
+  chainlit:
+    build:
+      context: .
+      dockerfile: Dockerfile.chainlit
+    container_name: audit-workflow-chainlit
+    ports:
+      - "8001:8001"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - BACKEND_API_URL=http://backend:8000
+      - CHROMA_PERSIST_DIR=/data/chroma
+      - DATABASE_URL=sqlite:////data/audit_trail.db
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - chroma_data:/data/chroma
+      - sqlite_data:/data
+      - chainlit_cache:/app/.chainlit
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - audit-network
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+    driver: local
+  sqlite_data:
+    driver: local
+  chainlit_cache:
+    driver: local
+
+networks:
+  audit-network:
+    driver: bridge

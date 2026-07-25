@@ -1,0 +1,74 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-rag-audit-workflow"
+version = "0.1.0"
+description = "Interfaz de chat conversacional (Chainlit) respaldada por un backend agéntico (FastAPI) que combina RAG (Chroma) sobre documentos de auditoría con herramientas de auditoría invocables por el LLM."
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Proprietary"}
+authors = [
+    {name = "Alejandro Javier Avila", email = "alejavieravila93@gmail.com"},
+]
+
+dependencies = [
+    # Backend API Framework
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+
+    # Database (SQLite + ORM)
+    "sqlalchemy>=2.0.0",
+
+    # Vector Store (Chroma)
+    "chromadb>=0.4.0",
+
+    # LLM Client (Groq via OpenAI-compatible API)
+    "openai>=1.0.0",
+
+    # Conversational UI
+    "chainlit>=1.0.0",
+
+    # Testing
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+
+    # Utilities
+    "python-dotenv>=1.0.0",
+    "python-multipart>=0.0.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.7.0",
+    "isort>=5.12.0",
+]
+
+[tool.setuptools]
+packages = ["app", "chainlit_ui"]
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "W", "I", "N"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = "--cov=app --cov=chainlit_ui --cov-report=html --cov-report=term-missing"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
