@@ -8,12 +8,15 @@ RUN apt-get update \
     && apt-get clean \
     && apt-get autoclean
 
-# Copy pyproject.toml and install Python dependencies via docker image build
-COPY pyproject.toml .
-RUN pip install --no-cache-dir -e . # docker image build
-
-# Copy Chainlit UI code
+# Copy application code and metadata before installing (editable install needs
+# the "app" package directory and README.md to already be present, since
+# pyproject.toml declares packages=["app", "chainlit_ui"] and readme="README.md").
+# The "app" package is required at runtime too: chainlit_ui/app.py imports
+# app.agentic_core, app.db, app.deps, app.models, app.routers, app.schemas directly.
+COPY pyproject.toml README.md ./
+COPY app/ ./app/
 COPY chainlit_ui/ ./chainlit_ui/
+RUN pip install --no-cache-dir -e . # docker image build
 
 # Create .chainlit config directory
 RUN mkdir -p /app/.chainlit
