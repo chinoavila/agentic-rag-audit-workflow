@@ -1,0 +1,91 @@
+# === Credenciales y secretos ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+secrets/
+**/secrets/**
+
+# === Claude Code (harness) ===
+.claude/settings.local.json
+.mcp.json
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+build/
+dist/
+.Python
+
+# === Entornos virtuales ===
+env/
+venv/
+.venv/
+ENV/
+**/env/
+**/venv/
+**/.venv/
+
+# === Tests / cobertura ===
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+
+# === Chainlit (local/dev) ===
+.chainlit/
+.files/
+chainlit_debug.log
+
+# === Persistencia RAG (Chroma/FAISS) ===
+chroma_db/
+**/chroma_persist/
+*.chroma/
+*.faiss
+*.index
+vectorstore/
+embeddings_cache/
+
+# === Datos de auditoría generados localmente ===
+# Evidencia subida, reportes generados y blob storage emulado en dev.
+# Nunca deben viajar al repo: pueden contener información sensible del cliente auditado.
+data/
+uploads/
+storage/
+evidence/
+reports/
+*.db
+*.sqlite
+*.sqlite3
+
+# === Docker ===
+docker-compose.override.yml
+.docker/
+
+# === Node (si se agrega frontend/tooling JS) ===
+node_modules/
+npm-debug.log*
+
+# === Logs ===
+*.log
+logs/
+
+# === OS / editor ===
+.DS_Store
+Thumbs.db
+.idea/
+
+# === Temporales ===
+tmp/
+.tmp/
+*.tmp
+.vscode/settings.json

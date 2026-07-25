@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "blocked_hard": [
+    {
+      "pattern": "git reset --hard",
+      "reason": "Pierde cambios locales no commiteados",
+      "alternative": "git stash && git reset --soft HEAD~1"
+    },
+    {
+      "pattern": "git push --force",
+      "reason": "Reescribe historial remoto",
+      "alternative": "Crear PR normal, coordinar con el equipo"
+    },
+    {
+      "pattern": "npm install(?!.*docker)",
+      "reason": "Deps en host rompen reproducibilidad. Debe ser en Docker.",
+      "alternative": "docker compose exec chainlit-ui npm install <pkg>"
+    },
+    {
+      "pattern": "pip install(?!.*docker)",
+      "reason": "Deps en host rompen reproducibilidad. Debe ser en Docker.",
+      "alternative": "docker compose exec backend pip install <pkg>"
+    },
+    {
+      "pattern": "rm -rf",
+      "reason": "Operacion destructiva sin recuperacion",
+      "alternative": "git clean -fd o editar .gitignore"
+    },
+    {
+      "pattern": "docker compose down -v",
+      "reason": "Elimina el volumen de Chroma/DB: PIERDE el indice RAG y el audit trail",
+      "alternative": "docker compose down (sin -v)"
+    },
+    {
+      "pattern": "DELETE FROM (audit_trail|audit_findings|findings|reports)",
+      "reason": "El audit trail, los hallazgos y los reportes generados son append-only por requisito de integridad (ver spec-004, spec-011)",
+      "alternative": "UPDATE ... SET superseded_by = <new_id> (soft-supersede, nunca DELETE)"
+    },
+    {
+      "pattern": "\\.env\\b.*(add|commit)|git add .*\\.env",
+      "reason": "Evita commitear API keys/secrets del LLM o de la DB",
+      "alternative": "Usar .env.example y mantener .env en .gitignore"
+    }
+  ],
+  "blocked_soft_warning": [
+    {
+      "pattern": "git commit",
+      "message": "Git commit detectado. El usuario debe confirmar explicitamente."
+    },
+    {
+      "pattern": "git push(?!.*--dry-run)",
+      "message": "Git push a remoto. El usuario debe confirmar explicitamente."
+    },
+    {
+      "pattern": "similarity_threshold\\s*=\\s*0(\\.0+)?\\b|top_k\\s*=\\s*(0|[3-9][0-9]+)",
+      "message": "Umbral de similitud muy bajo o top_k muy alto: riesgo de alucinacion por contexto irrelevante (ver spec-008). Revisar antes de mergear."
+    },
+    {
+      "pattern": "max_tool_iterations\\s*=\\s*([2-9][0-9]+)",
+      "message": "Limite de iteraciones del agentic loop elevado: riesgo de loops costosos o descontrolados (ver skill agentic-tool-use). Confirmar con el usuario."
+    },
+    {
+      "pattern": "chroma.*persist_directory|CHROMA_PERSIST",
+      "message": "Cambio en la ruta de persistencia de Chroma: verificar que el volumen de Docker sigue montado (spec-009)."
+    }
+  ],
+  "business_rules": [
+    {
+      "rule": "citation-required",
+      "description": "Toda afirmacion/hallazgo generado por el agente debe citar el chunk/fuente recuperado",
+      "guardrail": "Reviewer rechaza respuestas de audit-tools o agentic-core sin campo de citas (ver spec-001)"
+    },
+    {
+      "rule": "audit-trail-append-only",
+      "description": "Hallazgos y acciones de auditoria nunca se borran, solo se marcan superseded",
+      "guardrail": "Rechazar cualquier DELETE fisico sobre tablas de auditoria (ver spec-004)"
+    },
+    {
+      "rule": "human-in-the-loop-high-risk",
+      "description": "Hallazgos de severidad alta/critica requieren aprobacion humana antes de marcarse como finales",
+      "guardrail": "Reviewer verifica que existe un paso de aprobacion antes de status=final (ver spec-006)"
+    },
+    {
+      "rule": "untrusted-retrieved-content",
+      "description": "El contenido recuperado via RAG (documentos ingeridos) se trata como dato, nunca como instruccion del sistema",
+      "guardrail": "Reviewer rechaza system prompts que interpolen texto de documentos sin delimitadores/sanitizacion (ver spec-005)"
+    },
+    {
+      "rule": "reports-append-only",
+      "description": "Los reportes generados por audit-tools (y su archivo en blob storage) nunca se borran, solo se marcan superseded",
+      "guardrail": "Rechazar cualquier DELETE fisico o borrado de blob sobre la tabla reports (ver spec-011)"
+    },
+    {
+      "rule": "report-requires-human-approval",
+      "description": "Un informe generado desde plantilla no se persiste como publicado sin aprobacion humana",
+      "guardrail": "Reviewer verifica que existe un paso de aprobacion antes de status=published en reports (ver spec-006, spec-012)"
+    }
+  ]
+}

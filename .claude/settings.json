@@ -1,0 +1,59 @@
+{
+  "version": "1.0",
+  "description": "Harness de Claude Code para Agentic-RAG Audit Workflow (MAS + SDD + PEV)",
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/session-init.ps1"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/route-agent.ps1"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File .claude/hooks/pre-tool-guard.ps1"
+          }
+        ]
+      }
+    ]
+  },
+  "_hooks_unix_reference": "Equivalentes .sh en .claude/hooks/*.sh (requieren jq) para contribuidores en Unix; reemplazar el 'command' de cada hook por bash .claude/hooks/<script>.sh en .claude/settings.local.json si no se corre en Windows/PowerShell.",
+
+  "model_assignment": {
+    "orchestrator": "claude-opus-4-8",
+    "planner": "claude-sonnet-5",
+    "reviewer": "claude-sonnet-5",
+    "rag-engineer": "claude-sonnet-5",
+    "agentic-core": "claude-sonnet-5",
+    "audit-tools": "claude-sonnet-5",
+    "backend-api": "claude-sonnet-5",
+    "chainlit-ui": "claude-sonnet-5",
+    "security-compliance": "claude-sonnet-5",
+    "testing": "claude-haiku-4-5-20251001",
+    "deployment": "claude-haiku-4-5-20251001",
+    "documentation": "claude-haiku-4-5-20251001"
+  },
+
+  "ssot": {
+    "note": "Skills, specs, guardrails y handoffs viven SOLO en .ai/ (fuente unica). .claude/agents/ contiene la version ejecutable de Claude Code; .ai/agents/ contiene el espejo agnostico (sin frontmatter) para otras herramientas.",
+    "path": ".ai/"
+  }
+}
