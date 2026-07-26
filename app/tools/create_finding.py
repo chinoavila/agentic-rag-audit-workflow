@@ -301,6 +301,10 @@ def create_finding(tool_input: dict[str, Any], db: Session | None = None) -> dic
                 evidence=evidence_payload,
                 risk_score=risk_score,
                 status=_initial_status_for_severity(parsed.severity),
+                # `triggered_by` nunca se acepta como parte de `tool_input`/`CreateFindingInput`
+                # (el LLM no puede declarar su propia identidad): se fija acá en código, mismo
+                # criterio que `app/routers/findings.py` aplica del lado humano con "human".
+                triggered_by="llm",
             )
             session.add(finding)
             session.commit()

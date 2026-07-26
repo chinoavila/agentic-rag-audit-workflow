@@ -9,6 +9,18 @@ no tiene un tipo ENUM nativo cómodo para migraciones), pero se valida como `Lit
 nivel de Pydantic (`app/schemas/finding.py`) y se re-valida a nivel de aplicación en el
 router antes de cualquier escritura. `audit-tools` y `agentic-core` deben reusar esos
 mismos `Literal` en vez de aceptar `severity`/`status` libres.
+
+`triggered_by` (spec-005, hallazgo B de security-compliance) distingue si el hallazgo lo
+creó un humano (`POST /api/findings`, ver `app/routers/findings.py`) o el LLM (tool
+`create_finding`, ver `app/tools/create_finding.py`). Siempre se fija server-side; nunca
+se acepta como input del cliente (no existe en `FindingCreate`, solo en `FindingOut`).
+
+NOTA schema: esta app no tiene Alembic, usa `Base.metadata.create_all()` en el startup
+(no altera tablas existentes). Si tenés una DB SQLite del slice anterior sin esta columna,
+`create_all()` no la va a agregar sola y los INSERT van a fallar contra la tabla vieja —
+borrá el volumen y recreá la DB: `docker compose down` + `docker volume rm
+agentic-rag-audit-workflow_sqlite_data` (es un prototipo de dev local, no hay datos
+productivos que proteger todavía).
 """
 
 import uuid
@@ -42,6 +54,12 @@ class Finding(Base):
 
     # Taxonomía cerrada validada en Pydantic: low | medium | high | critical.
     severity: Mapped[str] = mapped_column(String(16), nullable=False)
+
+    # human | llm. Fijado siempre server-side (nunca por el cliente, ver docstring de módulo).
+    # server_default evita romper un `create_all()` sobre una tabla ya existente con filas
+    # (aunque para una tabla vieja que directamente no tiene la columna, no alcanza: hace
+    # falta recrear la DB, ver nota arriba).
+    triggered_by: Mapped[str] = mapped_column(String(16), nullable=False, server_default="human")
 
     # Lista de citas [{"source": str, "page": int}, ...]. Nunca vacía (validado en Pydantic).
     evidence: Mapped[list] = mapped_column(JSON, nullable=False)

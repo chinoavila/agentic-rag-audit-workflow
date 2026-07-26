@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 Severity = Literal["low", "medium", "high", "critical"]
 FindingStatus = Literal["draft", "pending_review", "final", "rejected"]
+TriggeredBy = Literal["human", "llm"]
 
 HIGH_RISK_SEVERITIES: tuple[str, ...] = ("high", "critical")
 
@@ -30,6 +31,11 @@ class FindingCreate(BaseModel):
     `status` no es aceptado en la creación: todo hallazgo nuevo empieza en `draft` (si es
     `low`/`medium`) o `pending_review` (si es `high`/`critical`, ver spec-006) — nunca en
     `final` directo. Esa derivación la hace el router, no el cliente.
+
+    `triggered_by` tampoco es aceptado acá (spec-005, hallazgo B): si un caller HTTP pudiera
+    mandar `triggered_by="llm"` se podría simular ser el agente. El código que escribe cada
+    `Finding` lo fija explícitamente según quién es (`POST /api/findings` siempre setea
+    `"human"`; la tool `create_finding` del LLM setea `"llm"` directo en el ORM).
     """
 
     case_id: str = Field(..., min_length=1)
@@ -68,6 +74,7 @@ class FindingOut(BaseModel):
     evidence: list[Citation]
     risk_score: float
     status: FindingStatus
+    triggered_by: TriggeredBy
     approved_by: str | None
     approved_at: datetime | None
     superseded_by: str | None

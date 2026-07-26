@@ -22,6 +22,9 @@ Reglas de negocio críticas aplicadas acá (ver `.ai/skills/audit-domain-rules/S
    `rejected` es responsabilidad del caller vía un nuevo `PATCH status=...`, y "deshacer"
    un rechazo en el sentido de auditoría (spec-004, append-only) se hace creando un nuevo
    `Finding` y usando `superseded_by`, no reescribiendo el status del original.
+5. `triggered_by` (spec-005) nunca viene del cliente (no existe en `FindingCreate`): este
+   router fija `"human"` a mano en `create_finding` porque este endpoint HTTP directo
+   siempre representa creación humana en este sistema.
 """
 
 from datetime import datetime, timezone
@@ -80,6 +83,10 @@ def create_finding(
         evidence=[citation.model_dump() for citation in payload.evidence],
         risk_score=payload.risk_score,
         status=_initial_status_for_severity(payload.severity),
+        # Fijado server-side siempre: este endpoint HTTP directo es siempre creación
+        # humana (spec-005, hallazgo B). La tool del LLM (create_finding) no pasa por
+        # este router — escribe "llm" directo contra el ORM.
+        triggered_by="human",
     )
     db.add(finding)
     db.commit()

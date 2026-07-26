@@ -65,11 +65,68 @@ class TestDefensaPromptInjection:
                 f"es responsabilidad solo de chainlit-ui (spec-005)"
             )
 
-    def test_action_records_triggered_by_source(self):
-        """Test pendiente: falta campo triggered_by en Finding para registrar fuente de acción."""
-        pytest.skip(
-            "pending implementation: falta campo triggered_by en Finding, ver hallazgo B de "
-            "security-compliance (task 7). Este test requiere columna triggered_by en modelo."
+    def test_action_records_triggered_by_source(self, db_session, client):
+        """triggered_by distingue un Finding creado por el LLM (tool) de uno creado por un humano
+        (endpoint HTTP directo) — ninguno de los dos caminos deja que el caller declare su propia
+        identidad: cada código fija el valor server-side (hallazgo B de security-compliance, task 7).
+        """
+        from app.models.audit_case import AuditCase
+        from app.models.finding import Finding
+        from app.tools.create_finding import create_finding
+
+        case = AuditCase(id="case_triggered_by", name="Test triggered_by")
+        db_session.add(case)
+        db_session.commit()
+
+        # Creación vía tool del LLM -> triggered_by="llm"
+        llm_result = create_finding(
+            {
+                "case_id": "case_triggered_by",
+                "title": "Hallazgo creado por el LLM",
+                "description": "desc",
+                "severity": "low",
+                "evidence": [{"source": "doc.pdf", "page": 1}],
+            },
+            db=db_session,
+        )
+        assert "error" not in llm_result, f"create_finding no debe fallar: {llm_result}"
+        llm_finding = db_session.get(Finding, llm_result["finding_id"])
+        assert llm_finding.triggered_by == "llm", "Finding creado por la tool debe tener triggered_by='llm'"
+
+        # Creación vía endpoint HTTP directo (humano) -> triggered_by="human"
+        response = client.post(
+            "/api/findings",
+            json={
+                "case_id": "case_triggered_by",
+                "title": "Hallazgo creado por un humano",
+                "description": "desc",
+                "severity": "low",
+                "risk_score": 2.5,
+                "evidence": [{"source": "doc.pdf", "page": 1}],
+            },
+        )
+        assert response.status_code == 201, response.text
+        assert response.json()["triggered_by"] == "human", (
+            "Finding creado vía POST /api/findings debe tener triggered_by='human'"
+        )
+
+        # Ninguno de los dos caminos acepta triggered_by como input del caller
+        spoofed = client.post(
+            "/api/findings",
+            json={
+                "case_id": "case_triggered_by",
+                "title": "Intento de spoofear triggered_by",
+                "description": "desc",
+                "severity": "low",
+                "risk_score": 1.0,
+                "triggered_by": "llm",
+                "evidence": [{"source": "doc.pdf", "page": 1}],
+            },
+        )
+        assert spoofed.status_code == 201, spoofed.text
+        assert spoofed.json()["triggered_by"] == "human", (
+            "triggered_by en el body del request debe ser ignorado; el servidor siempre "
+            "fija 'human' para este endpoint"
         )
 
     def test_wrap_untrusted_chunk_adds_delimiters(self):

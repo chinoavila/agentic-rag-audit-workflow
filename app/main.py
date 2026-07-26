@@ -11,6 +11,7 @@ Servicios:
 from fastapi import FastAPI, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy import inspect, text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.db import Base, engine
@@ -52,6 +53,34 @@ def _create_tables_if_missing() -> None:
     arranque del contenedor `backend`, incluso contra el volumen `sqlite_data` persistente.
     """
     Base.metadata.create_all(bind=engine)
+    _migrate_add_triggered_by_if_missing()
+
+
+def _migrate_add_triggered_by_if_missing() -> None:
+    """Migración puntual: agrega `findings.triggered_by` si la tabla ya existía de una
+    sesión anterior al agregado de esta columna (volumen `sqlite_data` persistente).
+
+    `create_all()` de arriba NO altera tablas ya existentes, así que sin esto cualquier
+    query sobre `findings` contra un volumen viejo rompe con "no such column:
+    findings.triggered_by" — borrar ese volumen para forzar una recreación no es la
+    respuesta correcta acá: el audit trail es append-only por diseño (spec-004), no algo
+    para tirar y recrear por un cambio de schema.
+
+    Esto NO es un motor de migraciones genérico, es un parche puntual y documentado. Si el
+    modelo vuelve a cambiar de forma incompatible con datos existentes, hace falta un
+    mecanismo real (Alembic) en vez de seguir apilando parches acá.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table("findings"):
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("findings")}
+    if "triggered_by" in existing_columns:
+        return
+    with engine.connect() as conn:
+        conn.execute(
+            text("ALTER TABLE findings ADD COLUMN triggered_by VARCHAR(16) NOT NULL DEFAULT 'human'")
+        )
+        conn.commit()
 
 
 @app.get("/api/health", status_code=status.HTTP_200_OK)
