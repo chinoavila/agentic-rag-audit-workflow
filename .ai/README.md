@@ -60,8 +60,14 @@ Reviewer**.
 
 ## Estado de los tests
 
-Los stubs en `tests/specs/` existen para todas las 13 specs pero están marcados
-`pytest.skip("pending implementation: spec-XXX")` porque el código de la aplicación aún no
-existe. Se completan a medida que `rag-engineer`, `agentic-core`, `audit-tools`,
-`backend-api` y `chainlit-ui` implementan cada feature — ese es el flujo SDD: spec → stub →
-código → assert real.
+**Slice 1 (actual):**
+- **46 tests pasando**: specs 001, 002, 004, 005 (parcial), 008, 010
+- **1 test skip intencional**: `test_action_records_triggered_by_source` en spec-005 (falta columna `triggered_by` en modelo `Finding`)
+- **31 tests deselected**: specs 003, 006, 007, 009, 011, 012, 013 (pendientes para próximos slices)
+
+Comando para ejecutar tests del slice 1:
+```bash
+docker compose run --rm backend python -m pytest -m "spec_001 or spec_002 or spec_004 or spec_005 or spec_008 or spec_010"
+```
+
+Ver tabla de estado en [`../../README.md`](../../README.md#estado-de-especificaciones-sdd) para detalles de implementación por spec.
