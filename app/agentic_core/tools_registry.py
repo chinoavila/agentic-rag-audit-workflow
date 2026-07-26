@@ -39,7 +39,12 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from app.rag.retrieval import SIMILARITY_THRESHOLD, TOP_K, retrieve
-from app.tools import CREATE_FINDING_TOOL_SPEC, create_finding
+from app.tools import (
+    CREATE_FINDING_TOOL_SPEC,
+    GENERATE_REPORT_TOOL_SPEC,
+    create_finding,
+    generate_report,
+)
 
 # ---------------------------------------------------------------------------
 # search_evidence
@@ -145,6 +150,7 @@ def _to_openai_tool(spec: dict[str, Any]) -> dict[str, Any]:
 AGENT_TOOL_SPECS: list[dict[str, Any]] = [
     _to_openai_tool(SEARCH_EVIDENCE_TOOL_SPEC),
     _to_openai_tool(CREATE_FINDING_TOOL_SPEC),
+    _to_openai_tool(GENERATE_REPORT_TOOL_SPEC),
 ]
 
 
@@ -167,9 +173,14 @@ def _dispatch_create_finding(tool_input: dict[str, Any], db: Session | None) -> 
     return create_finding(tool_input, db=db)
 
 
+def _dispatch_generate_report(tool_input: dict[str, Any], db: Session | None) -> dict[str, Any]:
+    return generate_report(tool_input, db=db)
+
+
 TOOL_DISPATCH: dict[str, Any] = {
     "search_evidence": _dispatch_search_evidence,
     "create_finding": _dispatch_create_finding,
+    "generate_report": _dispatch_generate_report,
 }
 
 __all__ = [

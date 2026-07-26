@@ -28,7 +28,10 @@ re-descubrirlas leyendo el código):
    de la tool, id de usuario dev fijo), no estado de ninguna sesión.
 4. **Actions tipadas (regla 4, spec-006)**: aprobar/rechazar un hallazgo `high`/`critical`
    en `pending_review` es siempre un `cl.Action` explícito (`approve_finding`/
-   `reject_finding`), nunca texto libre interpretado como "sí, apruébalo".
+   `reject_finding`), nunca texto libre interpretado como "sí, apruébalo". Mismo patrón para
+   informes generados por `generate_report` (spec-012): TODO informe queda en
+   `pending_review` (sin excepción por severidad, a diferencia de `findings`) y se aprueba/
+   rechaza vía `approve_report`/`reject_report`.
 5. **Chat profiles (regla 5)**: no aplica en este slice -- hay un único modo de operación
    (un asistente de auditoría). Si en el futuro se agrega un modo "solo consulta" (sin
    `create_finding` habilitada), ahí sí corresponde `@cl.set_chat_profiles`.
@@ -67,7 +70,9 @@ from app.db import SessionLocal
 from app.deps import get_current_user
 from app.models.audit_case import AuditCase
 from app.routers.findings import patch_finding
+from app.routers.reports import patch_report
 from app.schemas.finding import HIGH_RISK_SEVERITIES, FindingPatch
+from app.schemas.report import ReportPatch
 
 __version__ = "0.2.0"
 
@@ -178,6 +183,23 @@ def _format_create_finding_output(tool_output: dict) -> str:
     )
 
 
+def _format_generate_report_output(tool_output: dict) -> str:
+    if "error" in tool_output:
+        detail = f"Error: {tool_output['error']} (code={tool_output.get('code')})"
+        rubric_results = tool_output.get("rubric_results")
+        if rubric_results:
+            failed_checks = [c for c in rubric_results.get("checks", []) if not c["passed"]]
+            for check in failed_checks:
+                detail += f"\n- [{check['name']}] {check['detail']}"
+        return detail
+    return (
+        f"report_id={tool_output['report_id']}\n"
+        f"template_id={tool_output['template_id']}\n"
+        f"status={tool_output['status']}\n"
+        f"blob_path={tool_output['blob_path']}"
+    )
+
+
 async def _render_tool_call_step(record: ToolCallRecord) -> None:
     """Renderiza un `ToolCallRecord` en su propio `cl.Step` (regla 2: nunca ocultarlo como
     texto plano mezclado con la respuesta del asistente).
@@ -188,21 +210,28 @@ async def _render_tool_call_step(record: ToolCallRecord) -> None:
             step.output = _format_search_evidence_output(record.tool_output)
         elif record.tool_name == "create_finding":
             step.output = _format_create_finding_output(record.tool_output)
+        elif record.tool_name == "generate_report":
+            step.output = _format_generate_report_output(record.tool_output)
         else:
             step.output = json.dumps(record.tool_output, ensure_ascii=False, indent=2)
 
 
 async def _maybe_offer_approval_actions(tool_calls: list[ToolCallRecord]) -> None:
     """Ofrece Actions de aprobar/rechazar para cada `create_finding` que haya producido un
-    hallazgo `high`/`critical` en `pending_review` (spec-006, regla 4).
+    hallazgo `high`/`critical` en `pending_review` (spec-006, regla 4), y para cada
+    `generate_report` que haya persistido un informe (siempre `pending_review`: todo informe
+    requiere aprobación humana antes de `published`, spec-006 aplicado a reportes).
     """
     for record in tool_calls:
-        if record.tool_name != "create_finding":
-            continue
         output = record.tool_output
         if "error" in output:
             continue
-        if output.get("severity") in HIGH_RISK_SEVERITIES and output.get("status") == "pending_review":
+
+        if (
+            record.tool_name == "create_finding"
+            and output.get("severity") in HIGH_RISK_SEVERITIES
+            and output.get("status") == "pending_review"
+        ):
             finding_id = output["finding_id"]
             await cl.Message(
                 content=(
@@ -220,6 +249,27 @@ async def _maybe_offer_approval_actions(tool_calls: list[ToolCallRecord]) -> Non
                         name="reject_finding",
                         payload={"finding_id": finding_id},
                         label="Rechazar hallazgo",
+                    ),
+                ],
+            ).send()
+        elif record.tool_name == "generate_report" and output.get("status") == "pending_review":
+            report_id = output["report_id"]
+            await cl.Message(
+                content=(
+                    f"El informe `{report_id}` ({output['title']!r}) requiere aprobación "
+                    "humana explícita antes de poder publicarse (spec-006, human-in-the-loop "
+                    "aplicado a reportes). Elegí una acción:"
+                ),
+                actions=[
+                    cl.Action(
+                        name="approve_report",
+                        payload={"report_id": report_id},
+                        label="Aprobar informe",
+                    ),
+                    cl.Action(
+                        name="reject_report",
+                        payload={"report_id": report_id},
+                        label="Rechazar informe",
                     ),
                 ],
             ).send()
@@ -349,3 +399,63 @@ async def on_approve_finding(action: cl.Action) -> None:
 @cl.action_callback("reject_finding")
 async def on_reject_finding(action: cl.Action) -> None:
     await _resolve_finding_action(action, approve=False)
+
+
+# ---------------------------------------------------------------------------
+# Actions de aprobación humana para reportes (spec-006 aplicado a reportes, spec-011/spec-012)
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_report_action(action: cl.Action, *, approve: bool) -> None:
+    """Ejecuta la transición de un reporte tras un click en `approve_report`/
+    `reject_report`, llamando directamente `app.routers.reports.patch_report` (ver punto 6
+    del docstring del módulo) en vez de un HTTP call interno. A diferencia de
+    `_resolve_finding_action`, acá `status="rejected"` siempre está soportado (`ReportStatus`
+    lo incluye desde el diseño inicial de `app/schemas/report.py`, sin el gap histórico que
+    tuvo `FindingStatus`).
+    """
+    report_id = (action.payload or {}).get("report_id")
+    if not report_id:
+        await cl.Message(content="Acción inválida: falta `report_id` en el payload.").send()
+        return
+
+    target_status = "published" if approve else "rejected"
+    patch_payload = ReportPatch(status=target_status, approved_by=DEV_APPROVER_ID)
+
+    db = SessionLocal()
+    try:
+        try:
+            report = patch_report(
+                report_id,
+                patch_payload,
+                db=db,
+                current_user=get_current_user(),
+            )
+        except HTTPException as exc:
+            detail = exc.detail.get("detail") if isinstance(exc.detail, dict) else exc.detail
+            await cl.Message(
+                content=f"No se pudo procesar la acción sobre `{report_id}`: {detail}"
+            ).send()
+            return
+    finally:
+        db.close()
+
+    await action.remove()
+    verb = "aprobado" if approve else "rechazado"
+    await cl.Message(
+        content=(
+            f"Informe `{report.id}` {verb}.\n"
+            f"status={report.status}, approved_by={report.approved_by}, "
+            f"approved_at={report.approved_at}"
+        )
+    ).send()
+
+
+@cl.action_callback("approve_report")
+async def on_approve_report(action: cl.Action) -> None:
+    await _resolve_report_action(action, approve=True)
+
+
+@cl.action_callback("reject_report")
+async def on_reject_report(action: cl.Action) -> None:
+    await _resolve_report_action(action, approve=False)

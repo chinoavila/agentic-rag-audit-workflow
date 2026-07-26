@@ -20,7 +20,7 @@ from app.errors import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.routers import audit_cases, findings, rag_retrieval
+from app.routers import audit_cases, findings, rag_retrieval, reports
 
 # Aseguramos que los modelos ORM estén importados (y por lo tanto registrados en
 # `Base.metadata`) antes de crear las tablas en el startup event de abajo.
@@ -42,6 +42,7 @@ app.add_exception_handler(Exception, unhandled_exception_handler)
 app.include_router(audit_cases.router)
 app.include_router(findings.router)
 app.include_router(rag_retrieval.router)
+app.include_router(reports.router)
 
 
 @app.on_event("startup")

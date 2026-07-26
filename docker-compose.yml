@@ -12,6 +12,9 @@ services:
       - GROQ_API_KEY=${GROQ_API_KEY}
       - CHROMA_PERSIST_DIR=/data/chroma
       - AUDIT_DATABASE_URL=sqlite:////data/audit_trail.db
+      # Blob storage local de informes generados (spec-011): mismo volumen persistente
+      # sqlite_data que ya usa AUDIT_DATABASE_URL, bajo su propio subdirectorio.
+      - REPORTS_BLOB_DIR=/data/reports
       - PYTHONUNBUFFERED=1
     volumes:
       - chroma_data:/data/chroma
@@ -51,6 +54,7 @@ services:
       # data layer de persistencia (Postgres), y crashea /project/settings (asyncpg faltante)
       # dejando la SPA en blanco. AUDIT_DATABASE_URL es leído por app/db.py, no por Chainlit.
       - AUDIT_DATABASE_URL=sqlite:////data/audit_trail.db
+      - REPORTS_BLOB_DIR=/data/reports
       - PYTHONUNBUFFERED=1
     volumes:
       - chroma_data:/data/chroma

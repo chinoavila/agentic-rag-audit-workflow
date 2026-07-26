@@ -20,6 +20,9 @@ COPY app/ ./app/
 COPY chainlit_ui/ ./chainlit_ui/
 COPY tests/ ./tests/
 COPY docs/sample_evidence/ ./docs/sample_evidence/
+# Plantillas de informe (spec-012): versionadas en el repo (a diferencia de docs/references,
+# que es corpus privado del cliente auditado y está en .gitignore).
+COPY docs/report_templates/ ./docs/report_templates/
 # .ai/guardrails/ (no todo .ai/): tests/specs/test_spec_009_entorno_docker_reproducible.py
 # valida que el guardrail que bloquea borrar los volumenes nombrados siga documentado.
 COPY .ai/guardrails/ ./.ai/guardrails/

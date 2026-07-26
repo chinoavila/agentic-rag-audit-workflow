@@ -2,6 +2,7 @@
 
 from app.models.audit_case import AuditCase
 from app.models.finding import Finding
+from app.models.report import Report
 
-__all__ = ["AuditCase", "Finding"]
+__all__ = ["AuditCase", "Finding", "Report"]
 

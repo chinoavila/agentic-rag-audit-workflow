@@ -64,6 +64,7 @@ uploads/
 storage/
 evidence/
 reports/
+dev_reports_blob/
 *.db
 *.sqlite
 *.sqlite3
