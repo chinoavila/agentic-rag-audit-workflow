@@ -49,7 +49,12 @@ dependencies = [
     "openai>=1.0.0",
 
     # Conversational UI
-    "chainlit>=1.0.0",
+    # Pin exacto (no >=): el sidebar de herramientas/reportes (spec-014/018) depende de
+    # cl.CustomElement + cl.ElementSidebar, cuyo comportamiento varia entre versiones de
+    # Chainlit -- ver issue Chainlit/chainlit#1827 (elementos con display="side"/"page"
+    # inaccesibles en 2.0.0-2.0.603). 2.11.1 es la ultima estable al fijar este pin y postdata
+    # ese rango problematico.
+    "chainlit==2.11.1",
 
     # Testing
     "pytest>=7.4.0",

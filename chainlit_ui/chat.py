@@ -126,6 +126,16 @@ async def on_chat_start() -> None:
     cl.user_session.set("case_id", case.id)
     cl.user_session.set("conversation_history", [])
 
+    # --- SPIKE DESCARTABLE (Fase 0 del plan de sidebar, ver plan de sidebar de
+    # herramientas/reportes) --------------------------------------------------
+    # Confirma que esta version pinneada de Chainlit (pyproject.toml) renderiza
+    # cl.CustomElement + cl.ElementSidebar y que callAction hace round-trip a un
+    # @cl.action_callback real. Se retira apenas se confirme (o se decida el
+    # fallback) -- no es parte del feature final de sidebar.
+    await cl.ElementSidebar.set_title("Spike")
+    await cl.ElementSidebar.set_elements([cl.CustomElement(name="_Spike", props={})])
+    # --- FIN SPIKE -------------------------------------------------------------
+
     await cl.Message(
         content=(
             "Bienvenido a Agentic-RAG Audit Workflow.\n\n"
@@ -389,6 +399,15 @@ async def _resolve_finding_action(action: cl.Action, *, approve: bool) -> None:
             f"approved_at={finding.approved_at}"
         )
     ).send()
+
+
+@cl.action_callback("spike_ping")
+async def on_spike_ping(action: cl.Action) -> None:
+    """Handler del spike descartable de Fase 0 (ver docstring en `on_chat_start`):
+    confirma que un click en el CustomElement del sidebar hace round-trip real a Python
+    vía `callAction`. Se borra junto con `_Spike.jsx` una vez confirmado.
+    """
+    await cl.Message(content=f"spike_ping recibido: payload={action.payload!r}").send()
 
 
 @cl.action_callback("approve_finding")

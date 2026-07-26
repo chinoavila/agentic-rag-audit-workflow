@@ -20,6 +20,10 @@ COPY chainlit_ui/ ./chainlit_ui/
 # así que la tool generate_report (app/tools/generate_report.py) necesita esta carpeta acá
 # también para poder resolver template_id (spec-012), igual que en Dockerfile.backend.
 COPY docs/report_templates/ ./docs/report_templates/
+# public/elements/ contiene los Custom Elements (JSX) del sidebar de tools/reportes
+# (spec-014/018) -- Chainlit los resuelve relativos al cwd desde el que corre
+# "chainlit run" (WORKDIR /app acá), no relativos a chainlit_ui/.
+COPY public/ ./public/
 RUN pip install --no-cache-dir -e . # docker image build
 
 # Create .chainlit config directory
