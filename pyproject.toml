@@ -35,6 +35,15 @@ dependencies = [
     "pypdf>=4.0.0",
     "python-docx>=1.1.0",
     "openpyxl>=3.1.0",
+    # Fallback OCR para paginas de PDF donde pypdf extrae muy poco texto (p. ej.
+    # copias de biblioteca con marca de agua/DRM que renderizan el contenido
+    # real como imagen) -- ver app/rag/extractors.py::extract_pdf_pages.
+    # pymupdf (import "fitz") renderiza la pagina a imagen sin depender de
+    # poppler-utils externo; pytesseract es el wrapper del binario tesseract-ocr
+    # (instalado via apt en Dockerfile.backend, junto con el paquete de idioma
+    # espanol tesseract-ocr-spa).
+    "pymupdf>=1.24.0",
+    "pytesseract>=0.3.10",
 
     # LLM Client (Groq via OpenAI-compatible API)
     "openai>=1.0.0",

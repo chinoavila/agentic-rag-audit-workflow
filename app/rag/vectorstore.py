@@ -52,6 +52,7 @@ class _FastEmbedMultilingualFunction(ChromaEmbeddingFunction[Documents]):
     def __init__(self, model_name: str) -> None:
         from fastembed import TextEmbedding
 
+        self._model_name = model_name
         self._model = TextEmbedding(model_name=model_name)
 
     def __call__(self, input: Documents) -> Embeddings:
@@ -59,6 +60,9 @@ class _FastEmbedMultilingualFunction(ChromaEmbeddingFunction[Documents]):
 
     def name(self) -> str:
         return "fastembed-multilingual"
+
+    def get_config(self) -> dict:
+        return {"model_name": self._model_name}
 
 
 EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"

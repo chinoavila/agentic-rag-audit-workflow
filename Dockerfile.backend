@@ -3,8 +3,12 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies (cleanup via apt-get and package management)
+# tesseract-ocr + tesseract-ocr-spa (paquete de idioma espanol, el corpus es
+# 100% en espanol): fallback OCR para paginas de PDF donde pypdf extrae muy
+# poco texto (copias de biblioteca con marca de agua/DRM que renderizan el
+# contenido real como imagen) -- ver app/rag/extractors.py::extract_pdf_pages.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc \
+    && apt-get install -y --no-install-recommends gcc tesseract-ocr tesseract-ocr-spa \
     && apt-get clean \
     && apt-get autoclean
 
