@@ -11,9 +11,11 @@ RUN apt-get update \
 # Copy application code and metadata before installing (editable install needs
 # the "app" package directory and README.md to already be present, since
 # pyproject.toml declares packages=["app", "chainlit_ui"] and readme="README.md")
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md pytest.ini ./
 COPY app/ ./app/
 COPY chainlit_ui/ ./chainlit_ui/
+COPY tests/ ./tests/
+COPY docs/sample_evidence/ ./docs/sample_evidence/
 RUN pip install --no-cache-dir -e . # docker image build
 
 # Expose port

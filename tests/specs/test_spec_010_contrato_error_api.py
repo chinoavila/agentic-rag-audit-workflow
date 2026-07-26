@@ -53,7 +53,7 @@ class TestContratoErrorApi:
         """POST con validation error (422) preserva lista de errores en detail."""
         # Setup: crear un case para que el POST tenga una case_id válida
         from app.models.audit_case import AuditCase
-        case = AuditCase(id="case_422", name="Test", description="Test")
+        case = AuditCase(id="case_422", name="Test")
         db_session.add(case)
         db_session.commit()
 
@@ -87,7 +87,7 @@ class TestContratoErrorApi:
 
         # Setup: crear un case para poder hacer POST exitoso
         from app.models.audit_case import AuditCase
-        case = AuditCase(id="case_status", name="Test", description="Test")
+        case = AuditCase(id="case_status", name="Test")
         db_session.add(case)
         db_session.commit()
 
@@ -212,7 +212,7 @@ class TestContratoErrorApi:
         """Spot check: todos los errores en varios endpoints tienen el shape {"detail", "code"}."""
         # Setup
         from app.models.audit_case import AuditCase
-        case = AuditCase(id="case_spot", name="Test", description="Test")
+        case = AuditCase(id="case_spot", name="Test")
         db_session.add(case)
         db_session.commit()
 

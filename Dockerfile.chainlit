@@ -29,4 +29,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8001/health || exit 1
 
 # Run Chainlit UI
-CMD ["chainlit", "run", "chainlit_ui/app.py", "--host", "0.0.0.0", "--port", "8001"]
+# Entrypoint is deliberately NOT named app.py: chainlit's module loader inserts
+# chainlit_ui/ at the front of sys.path before exec'ing this file, so a file named
+# app.py would shadow the real top-level "app" package the moment this module does
+# `from app.agentic_core...` — resolving to itself instead of app/agentic_core/.
+CMD ["chainlit", "run", "chainlit_ui/chat.py", "--host", "0.0.0.0", "--port", "8001"]
