@@ -16,6 +16,10 @@ RUN apt-get update \
 COPY pyproject.toml README.md ./
 COPY app/ ./app/
 COPY chainlit_ui/ ./chainlit_ui/
+# chainlit_ui/chat.py ejecuta run_agent_turn en el mismo proceso (no via HTTP al backend),
+# así que la tool generate_report (app/tools/generate_report.py) necesita esta carpeta acá
+# también para poder resolver template_id (spec-012), igual que en Dockerfile.backend.
+COPY docs/report_templates/ ./docs/report_templates/
 RUN pip install --no-cache-dir -e . # docker image build
 
 # Create .chainlit config directory
