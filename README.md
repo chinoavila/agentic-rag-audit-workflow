@@ -69,7 +69,10 @@ Todas las variables sensibles se leen desde archivo `.env` (no versionado):
 - `GROQ_API_KEY`: Token para LLM Groq (requerido)
 - `BACKEND_API_URL`: URL de acceso al backend desde Chainlit
 - `CHROMA_PERSIST_DIR`: Ruta de persistencia Chroma
-- `DATABASE_URL`: Cadena de conexión SQLite
+- `AUDIT_DATABASE_URL`: Cadena de conexión SQLite (deliberadamente no `DATABASE_URL`: ese nombre
+  colisiona con la convención de Chainlit para su propio data layer de persistencia respaldado
+  por Postgres — con `DATABASE_URL` seteado, Chainlit intenta inicializarlo y crashea
+  `/project/settings`, dejando la SPA en pantalla en blanco)
 
 Ver `.env.example` para template completo. El archivo `.env.example` está versionado en git para referencia; los valores reales van solo en `.env` (en gitignore).
 

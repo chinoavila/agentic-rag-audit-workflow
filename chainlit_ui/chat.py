@@ -38,7 +38,7 @@ re-descubrirlas leyendo el código):
    de negocio relevante), igual patrón que ya usa `app/tools/create_finding.py`
    (`audit-tools`, task 4). `chainlit` y `backend` corren en contenedores separados
    (`docker-compose.yml`) pero comparten el mismo volumen `sqlite_data`
-   (`DATABASE_URL=sqlite:////data/audit_trail.db`), así que ambos procesos leen/escriben la
+   (`AUDIT_DATABASE_URL=sqlite:////data/audit_trail.db`), así que ambos procesos leen/escriben la
    misma base sin problema de consistencia para este slice.
 7. **Auth (spec-007, incompleto a propósito en este slice)**: `app/deps.py::get_current_user`
    es un stub que siempre resuelve al mismo usuario fijo de desarrollo (`dev-user-0`), sin
