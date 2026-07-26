@@ -89,27 +89,39 @@ class TestIngestaIdempotente:
             assert len(meta["doc_hash"]) == 64  # SHA256 hex = 64 caracteres
 
     def test_unsupported_file_format_is_rejected(self, test_doc_path):
-        """Archivo con extensión no soportada es rechazado explícitamente."""
+        """Archivo con extensión no soportada es rechazado explícitamente.
+
+        NOTA: antes de agregar soporte para PDF/DOCX/XLSX (corpus
+        `docs/references/`) este test usaba `.xlsx` como ejemplo de formato no
+        soportado; ahora `.xlsx` SÍ está soportado (ver
+        `test_supported_formats_only_txt_and_md`), así que se usa `.exe` --
+        genuinamente no soportado -- para seguir probando el mismo criterio de
+        aceptación de spec-002.
+        """
         # Setup: crear archivo con extensión no soportada
-        unsupported_file = test_doc_path / "data.xlsx"
-        unsupported_file.write_text("fake excel content")
+        unsupported_file = test_doc_path / "data.exe"
+        unsupported_file.write_text("fake binary content")
 
         # Act & Assert: load_document levanta UnsupportedFormatError
         with pytest.raises(UnsupportedFormatError) as exc_info:
             load_document(unsupported_file)
 
         # El mensaje debe mencionar la extensión no soportada
-        assert ".xlsx" in str(exc_info.value) or "xlsx" in str(exc_info.value).lower()
+        assert ".exe" in str(exc_info.value) or "exe" in str(exc_info.value).lower()
 
     def test_validate_supported_format_rejects_unsupported(self, test_doc_path):
-        """validate_supported_format rechaza extensiones no en SUPPORTED_EXTENSIONS."""
-        # Setup: archivo .pdf
-        pdf_file = test_doc_path / "doc.pdf"
-        pdf_file.write_text("fake pdf")
+        """validate_supported_format rechaza extensiones no en SUPPORTED_EXTENSIONS.
+
+        NOTA: usaba `.pdf` como ejemplo antes de agregarle soporte a PDF; ahora
+        usa `.exe` (ver nota en `test_unsupported_file_format_is_rejected`).
+        """
+        # Setup: archivo .exe
+        exe_file = test_doc_path / "doc.exe"
+        exe_file.write_text("fake binary")
 
         # Act & Assert
         with pytest.raises(UnsupportedFormatError):
-            validate_supported_format(pdf_file)
+            validate_supported_format(exe_file)
 
     def test_compute_doc_hash_deterministic(self):
         """compute_doc_hash es determinista: mismo contenido = mismo hash."""
@@ -128,7 +140,15 @@ class TestIngestaIdempotente:
         assert hash1 != hash2, "Contenido distinto debe dar hash distinto"
 
     def test_supported_formats_only_txt_and_md(self, test_doc_path):
-        """Solo .txt y .md son formatos soportados."""
+        """Formatos soportados: .txt, .md, .pdf, .docx, .xlsx; el resto se rechaza.
+
+        NOTA: el nombre original de este test era literal ("solo .txt y .md")
+        porque ese era el alcance del slice inicial. Se ampliaron los formatos
+        soportados para poder ingerir el corpus real `docs/references/`
+        (PDF/DOCX/XLSX) -- se mantiene el nombre del test (evita re-parametrizar
+        el marcador `spec_002` en el runner) pero se actualizó el cuerpo para
+        reflejar el alcance real de `SUPPORTED_EXTENSIONS`.
+        """
         # .txt: debe aceptarse
         txt_file = test_doc_path / "test.txt"
         txt_file.write_text("content")
@@ -139,8 +159,24 @@ class TestIngestaIdempotente:
         md_file.write_text("# Markdown")
         validate_supported_format(md_file)  # No debe lanzar
 
-        # .docx: debe rechazarse
+        # .pdf: debe aceptarse (validate_supported_format solo mira la extensión,
+        # no valida que el contenido sea un PDF real)
+        pdf_file = test_doc_path / "test.pdf"
+        pdf_file.write_text("fake")
+        validate_supported_format(pdf_file)  # No debe lanzar
+
+        # .docx: debe aceptarse
         docx_file = test_doc_path / "test.docx"
         docx_file.write_text("fake")
+        validate_supported_format(docx_file)  # No debe lanzar
+
+        # .xlsx: debe aceptarse
+        xlsx_file = test_doc_path / "test.xlsx"
+        xlsx_file.write_text("fake")
+        validate_supported_format(xlsx_file)  # No debe lanzar
+
+        # .exe: debe rechazarse (genuinamente no soportado)
+        exe_file = test_doc_path / "test.exe"
+        exe_file.write_text("fake")
         with pytest.raises(UnsupportedFormatError):
-            validate_supported_format(docx_file)
+            validate_supported_format(exe_file)

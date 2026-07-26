@@ -5,6 +5,11 @@ documentos de auditoría ya indexados.
 `POST /api/rag/ingest`: dispara la ingesta (idempotente) de
 `docs/sample_evidence/` — ver `app/rag/ingest_sample.py` para la alternativa de
 script manual (misma función de ingesta, dos formas de invocarla).
+`POST /api/rag/ingest-references`: dispara la ingesta recursiva y tolerante a
+fallos (idempotente) del corpus real `docs/references/` — ver
+`app/rag/ingest_references.py` para la vía recomendada (script CLI, con
+progreso por archivo); este endpoint puede tardar varios minutos en responder
+(ver su docstring).
 
 Nota para `agentic-core` (quien consume `/api/rag/query`): la respuesta trae
 los chunks como datos estructurados (`chunks[].text`, `.citation`), nunca como
@@ -29,14 +34,23 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.rag.ingestion import IngestionResult, UnsupportedFormatError, ingest_directory
+from app.rag.ingestion import (
+    IngestionFailure,
+    IngestionResult,
+    UnsupportedFormatError,
+    ingest_directory,
+    ingest_directory_recursive,
+)
 from app.rag.retrieval import RetrievalResult, retrieve
 
 router = APIRouter(prefix="/api/rag", tags=["rag"])
 
-# docs/sample_evidence/ vive en la raíz del repo, tres niveles arriba de este
-# archivo (app/routers/rag_retrieval.py -> app/routers -> app -> raíz).
+# docs/sample_evidence/ y docs/references/ viven en la raíz del repo, tres
+# niveles arriba de este archivo (app/routers/rag_retrieval.py -> app/routers
+# -> app -> raíz). docs/references/ se bind-montea de solo lectura en Docker
+# (docker-compose.yml); no existe fuera de un contenedor con ese mount.
 SAMPLE_EVIDENCE_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "sample_evidence"
+REFERENCE_DOCS_DIR = Path(__file__).resolve().parent.parent.parent / "docs" / "references"
 
 
 # ---------------------------------------------------------------------------
@@ -83,6 +97,18 @@ class IngestResultOut(BaseModel):
 class IngestSampleResponse(BaseModel):
     directory: str
     ingested: list[IngestResultOut]
+
+
+class IngestFailureOut(BaseModel):
+    source: str
+    error_type: str
+    error_message: str
+
+
+class IngestReferencesResponse(BaseModel):
+    directory: str
+    ingested: list[IngestResultOut]
+    failed: list[IngestFailureOut]
 
 
 def _to_response(result: RetrievalResult) -> RagQueryResponse:
@@ -157,4 +183,56 @@ async def ingest_sample_evidence() -> IngestSampleResponse:
     return IngestSampleResponse(
         directory=str(SAMPLE_EVIDENCE_DIR),
         ingested=[_to_ingest_out(r) for r in results],
+    )
+
+
+@router.post(
+    "/ingest-references",
+    response_model=IngestReferencesResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def ingest_reference_corpus() -> IngestReferencesResponse:
+    """Ingesta recursiva y tolerante a fallos de `docs/references/` (endpoint interno/manual).
+
+    ADVERTENCIA: `docs/references/` es un corpus real de ~59 archivos / ~52MB
+    (PDFs de hasta 17MB) — esta request es SÍNCRONA y puede tardar VARIOS
+    MINUTOS en responder, sin forma de reportar progreso parcial mientras corre
+    (a diferencia del script CLI, que imprime progreso por archivo). Para la
+    carga masiva inicial se recomienda el script CLI:
+
+        docker compose exec backend python -m app.rag.ingest_references
+
+    Este endpoint es más útil para re-disparar la ingesta manualmente ya con el
+    corpus conocido/estable (p. ej. tras agregar un archivo nuevo), no para el
+    seed inicial. Es idempotente (spec-002): correrlo más de una vez sobre el
+    mismo contenido no duplica chunks. Igual que `/ingest`, no es una tool
+    expuesta al LLM del agente.
+    """
+    if not REFERENCE_DOCS_DIR.is_dir():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No existe el directorio de referencias: {REFERENCE_DOCS_DIR}",
+        )
+
+    try:
+        results = ingest_directory_recursive(REFERENCE_DOCS_DIR)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fallo la ingesta del corpus de referencias: {exc}",
+        ) from exc
+
+    ingested = [_to_ingest_out(r) for r in results if isinstance(r, IngestionResult)]
+    failed = [
+        IngestFailureOut(
+            source=r.source, error_type=r.error_type, error_message=r.error_message
+        )
+        for r in results
+        if isinstance(r, IngestionFailure)
+    ]
+
+    return IngestReferencesResponse(
+        directory=str(REFERENCE_DOCS_DIR),
+        ingested=ingested,
+        failed=failed,
     )

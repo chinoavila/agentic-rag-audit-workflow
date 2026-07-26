@@ -16,6 +16,10 @@ services:
     volumes:
       - chroma_data:/data/chroma
       - sqlite_data:/data
+      # docs/references está en .gitignore (corpus de referencia local, ~50MB de PDFs) y no
+      # se hornea en la imagen vía COPY: se bind-montea de solo lectura para no forzar un
+      # rebuild cada vez que cambia, y para no distribuir ese contenido dentro de la imagen.
+      - ./docs/references:/app/docs/references:ro
     healthcheck:
       test:
         [
