@@ -25,6 +25,11 @@ dependencies = [
 
     # Vector Store (Chroma)
     "chromadb>=0.4.0",
+    # Embeddings multilingües (el default de Chroma, all-MiniLM-L6-v2, está optimizado
+    # para inglés y no discrimina bien texto en español — ver app/rag/vectorstore.py).
+    # fastembed corre el mismo modelo vía ONNX Runtime, sin traer pytorch/transformers
+    # completos (~220MB el modelo cuantizado vs. varios GB del stack de torch).
+    "fastembed>=0.3.0",
 
     # Extracción de texto de documentos binarios (docs/references/: PDF/DOCX/XLSX)
     "pypdf>=4.0.0",

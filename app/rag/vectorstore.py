@@ -12,7 +12,8 @@ import os
 from typing import TYPE_CHECKING
 
 import chromadb
-from chromadb.utils import embedding_functions
+from chromadb.api.types import Documents, Embeddings
+from chromadb.api.types import EmbeddingFunction as ChromaEmbeddingFunction
 
 if TYPE_CHECKING:  # pragma: no cover - solo para type hints, no se ejecuta en runtime.
     # El path exacto de estos tipos internos varía entre versiones de chromadb; se
@@ -24,12 +25,46 @@ if TYPE_CHECKING:  # pragma: no cover - solo para type hints, no se ejecuta en r
     from chromadb.api.models.Collection import Collection
 
 # Modelo de embeddings explícito (rag-ingestion SKILL.md regla 5: "no implícito").
-# `all-MiniLM-L6-v2` es el modelo local por defecto que trae
-# `chromadb.utils.embedding_functions.DefaultEmbeddingFunction()` (sentence-transformers,
-# corre vía onnxruntime, sin llamadas externas). Se instancia acá explícitamente en vez
-# de dejar que Chroma use un default implícito si no se pasa `embedding_function`.
-EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
-EMBEDDING_FUNCTION = embedding_functions.DefaultEmbeddingFunction()
+# NO usamos `DefaultEmbeddingFunction()` (all-MiniLM-L6-v2): es un modelo optimizado
+# para inglés que en la práctica no discrimina bien contenido en español — para el
+# corpus real de `docs/references/` (normativa de auditoría en español) devolvía
+# resultados genéricos/parejos (~0.65-0.74 de similitud sin importar relevancia real)
+# y no lograba priorizar el pasaje correcto de entre las top-30 respuestas para una
+# consulta cuyo texto literal SÍ está en el corpus.
+#
+# `paraphrase-multilingual-MiniLM-L12-v2` está entrenado explícitamente para +50
+# idiomas (incluido español) y da resultados sensiblemente mejores para este corpus.
+# Se sirve vía la librería `fastembed` de Qdrant (ONNX Runtime puro) en vez de
+# `SentenceTransformerEmbeddingFunction` (que arrastra pytorch/transformers
+# completos, varios GB) — mismo modelo, mismos vectores, ~220MB de descarga en
+# vez de un stack de ML pesado innecesario para inferencia.
+#
+# La versión de chromadb fijada acá (1.5.9) ya no expone un `FastEmbedEmbeddingFunction`
+# de fábrica en `chromadb.utils.embedding_functions` (solo quedó la variante sparse),
+# así que se envuelve `fastembed.TextEmbedding` a mano implementando el protocolo
+# `EmbeddingFunction` de chromadb (`__call__(Documents) -> Embeddings` es lo único
+# que exige en runtime; `name`/`get_config`/`build_from_config` tienen default no
+# implementado en la clase base y no hacen falta porque acá siempre se pasa la
+# instancia ya construida, nunca se reconstruye desde config serializada).
+
+
+class _FastEmbedMultilingualFunction(ChromaEmbeddingFunction[Documents]):
+    def __init__(self, model_name: str) -> None:
+        from fastembed import TextEmbedding
+
+        self._model = TextEmbedding(model_name=model_name)
+
+    def __call__(self, input: Documents) -> Embeddings:
+        return [vector.tolist() for vector in self._model.embed(list(input))]
+
+    def name(self) -> str:
+        return "fastembed-multilingual"
+
+
+EMBEDDING_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+EMBEDDING_FUNCTION = _FastEmbedMultilingualFunction(
+    model_name=f"sentence-transformers/{EMBEDDING_MODEL_NAME}"
+)
 
 # Naming de colección explícito y versionado: {dominio}_{modelo_embedding}_v{n}
 # (vectorstore-chroma-faiss SKILL.md regla 2). Bump a v2 si cambia el modelo de
