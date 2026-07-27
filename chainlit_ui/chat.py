@@ -66,6 +66,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from app.agentic_core.loop import AgentTurnResult, ToolCallRecord, run_agent_turn
+from app.agentic_core.tools_registry import search_evidence
 from app.db import SessionLocal
 from app.deps import get_current_user
 from app.models.audit_case import AuditCase
@@ -74,7 +75,34 @@ from app.routers.reports import patch_report
 from app.schemas.finding import HIGH_RISK_SEVERITIES, FindingPatch
 from app.schemas.report import ReportPatch
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
+
+# Catálogo de tools mostrado en el sidebar (spec-014). Estático por ahora -- se reemplaza por
+# `app/agentic_core/tool_catalog.py` (Fase 1 del plan de sidebar) cuando exista, que va a ser
+# la única fuente de verdad tanto para esto como para `AGENT_TOOL_SPECS`/`TOOL_DISPATCH`.
+# `runnable=True` solo en tools sin campos `list[object]` requeridos en su input_schema
+# (decisión de diseño ya tomada: `create_finding`/`generate_report` quedan chat-only por
+# ahora, ver plan de sidebar).
+TOOLS_SIDEBAR_CATALOG: list[dict] = [
+    {
+        "name": "search_evidence",
+        "label": "Buscar evidencia",
+        "description": "Busca evidencia relevante en los documentos indexados (RAG).",
+        "runnable": True,
+    },
+    {
+        "name": "create_finding",
+        "label": "Registrar hallazgo",
+        "description": "Registra un hallazgo de auditoría con evidencia citada.",
+        "runnable": False,
+    },
+    {
+        "name": "generate_report",
+        "label": "Generar informe",
+        "description": "Genera un informe de auditoría desde una plantilla.",
+        "runnable": False,
+    },
+]
 
 # Identidad fija de desarrollo usada para `approved_by` al resolver una Action de
 # aprobación/rechazo (ver punto 7 del docstring del módulo). Es un valor constante e
@@ -91,60 +119,174 @@ DEV_APPROVER_ID = "dev-user-0"
 
 
 def _create_default_audit_case(db: Session) -> AuditCase:
-    """Crea un `AuditCase` de ejemplo para esta sesión de chat.
+    """Crea el primer `AuditCase` ("proyecto") cuando todavía no existe ninguno.
 
     Ver punto 6 del docstring del módulo: acceso directo a la sesión SQLAlchemy en vez de un
     HTTP call interno a `POST /api/audit-cases`.
     """
-    case = AuditCase(name="Caso de auditoría de ejemplo (slice end-to-end)", status="open")
+    case = AuditCase(name="Proyecto inicial", status="open")
     db.add(case)
     db.commit()
     db.refresh(case)
     return case
 
 
+def _list_audit_cases(db: Session) -> list[AuditCase]:
+    """Todos los proyectos existentes, más reciente primero (para listarlos en el sidebar)."""
+    return db.query(AuditCase).order_by(AuditCase.created_at.desc()).all()
+
+
+def _sidebar_props(db: Session, active_case_id: str) -> dict:
+    cases = _list_audit_cases(db)
+    return {
+        "activeCaseId": active_case_id,
+        "projects": [{"id": c.id, "name": c.name, "status": c.status} for c in cases],
+        "tools": TOOLS_SIDEBAR_CATALOG,
+    }
+
+
+async def _refresh_sidebar(db: Session, active_case_id: str) -> None:
+    """Redibuja el sidebar (`public/elements/Sidebar.jsx`) con el estado actual de proyectos.
+
+    Se llama después de cualquier acción que cambie la lista de proyectos o el proyecto
+    activo (crear, cambiar) para que el resaltado y el listado queden consistentes.
+    """
+    await cl.ElementSidebar.set_title("Proyectos y herramientas")
+    await cl.ElementSidebar.set_elements(
+        [cl.CustomElement(name="Sidebar", props=_sidebar_props(db, active_case_id))]
+    )
+
+
 @cl.on_chat_start
 async def on_chat_start() -> None:
-    """Inicializa la sesión de chat: crea el caso de auditoría activo y el historial vacío.
+    """Inicializa la sesión de chat: activa un proyecto y muestra el sidebar de
+    proyectos/herramientas.
+
+    Si ya existen proyectos (`AuditCase`), esta sesión arranca sobre el más reciente en vez de
+    crear uno nuevo cada vez -- el sidebar (`switch_project`/`new_project`) es la forma de
+    cambiar de proyecto o crear uno, mismo patrón que Claude Desktop/ChatGPT/Gemini.
 
     Aislamiento de sesión (regla 3 / spec-007): `case_id` y `conversation_history` se guardan
     únicamente en `cl.user_session`, que Chainlit aísla por conexión -- dos usuarios (o dos
-    pestañas) nunca comparten ni pisan el `case_id`/historial del otro, y reiniciar el
-    proceso de Chainlit no filtra estado de una sesión a otra (no hay ninguna variable de
-    módulo mutable involucrada).
+    pestañas) nunca comparten ni pisan el `case_id`/historial del otro.
 
-    Esta función abre y cierra su propia `Session` de SQLAlchemy de vida corta, solo para la
-    escritura del `AuditCase` inicial (ver `on_message` para el manejo de sesión del resto
-    del ciclo de vida del chat: una sesión nueva por turno, documentado ahí).
+    Esta función abre y cierra su propia `Session` de SQLAlchemy de vida corta (ver
+    `on_message` para el manejo de sesión del resto del ciclo de vida del chat).
     """
     db = SessionLocal()
     try:
-        case = _create_default_audit_case(db)
+        cases = _list_audit_cases(db)
+        case = cases[0] if cases else _create_default_audit_case(db)
+
+        cl.user_session.set("case_id", case.id)
+        cl.user_session.set("conversation_history", [])
+
+        await _refresh_sidebar(db, case.id)
     finally:
         db.close()
-
-    cl.user_session.set("case_id", case.id)
-    cl.user_session.set("conversation_history", [])
-
-    # --- SPIKE DESCARTABLE (Fase 0 del plan de sidebar, ver plan de sidebar de
-    # herramientas/reportes) --------------------------------------------------
-    # Confirma que esta version pinneada de Chainlit (pyproject.toml) renderiza
-    # cl.CustomElement + cl.ElementSidebar y que callAction hace round-trip a un
-    # @cl.action_callback real. Se retira apenas se confirme (o se decida el
-    # fallback) -- no es parte del feature final de sidebar.
-    await cl.ElementSidebar.set_title("Spike")
-    await cl.ElementSidebar.set_elements([cl.CustomElement(name="_Spike", props={})])
-    # --- FIN SPIKE -------------------------------------------------------------
 
     await cl.Message(
         content=(
             "Bienvenido a Agentic-RAG Audit Workflow.\n\n"
-            f"Se creó automáticamente el caso de auditoría de ejemplo `{case.id}` "
-            f"({case.name!r}) para esta sesión.\n\n"
+            f"Proyecto activo: `{case.name}` (`{case.id}`). Usá el sidebar para crear un "
+            "proyecto nuevo, cambiar a otro existente, o ejecutar una herramienta "
+            "explícitamente.\n\n"
             "Pedime que busque evidencia sobre algún tema en los documentos indexados, o que "
             "registre un hallazgo de auditoría a partir de esa evidencia."
         )
     ).send()
+
+
+# ---------------------------------------------------------------------------
+# Acciones del sidebar: proyectos (spec-017) y ejecución explícita de tools (spec-014)
+# ---------------------------------------------------------------------------
+
+
+@cl.action_callback("new_project")
+async def on_new_project(action: cl.Action) -> None:
+    """Crea un proyecto nuevo (`callAction` desde el botón "+ Nuevo proyecto" del sidebar) y
+    lo activa para esta sesión.
+    """
+    response = await cl.AskUserMessage(
+        content="¿Cómo se llama el proyecto nuevo?", timeout=120
+    ).send()
+    name = (response or {}).get("output", "").strip() if response else ""
+    if not name:
+        await cl.Message(content="Creación de proyecto cancelada (sin nombre).").send()
+        return
+
+    db = SessionLocal()
+    try:
+        case = AuditCase(name=name, status="open")
+        db.add(case)
+        db.commit()
+        db.refresh(case)
+
+        cl.user_session.set("case_id", case.id)
+        cl.user_session.set("conversation_history", [])
+
+        await _refresh_sidebar(db, case.id)
+    finally:
+        db.close()
+
+    await cl.Message(content=f"Proyecto `{case.name}` creado y activado.").send()
+
+
+@cl.action_callback("switch_project")
+async def on_switch_project(action: cl.Action) -> None:
+    """Cambia el proyecto activo de esta sesión (click en un item de la lista del sidebar)."""
+    case_id = (action.payload or {}).get("case_id")
+    if not case_id or case_id == cl.user_session.get("case_id"):
+        return
+
+    db = SessionLocal()
+    try:
+        case = db.get(AuditCase, case_id)
+        if case is None:
+            await cl.Message(content="Ese proyecto ya no existe.").send()
+            return
+
+        cl.user_session.set("case_id", case.id)
+        # TODO(spec-017, `CaseTurn`): reponer el historial persistido de este proyecto en vez
+        # de arrancar en blanco -- ese modelo todavía no existe (ver plan de sidebar, Fase 1).
+        cl.user_session.set("conversation_history", [])
+
+        await _refresh_sidebar(db, case.id)
+    finally:
+        db.close()
+
+    await cl.Message(content=f"Proyecto activo: `{case.name}`.").send()
+
+
+@cl.action_callback("invoke_tool_explicit")
+async def on_invoke_tool_explicit(action: cl.Action) -> None:
+    """Ejecuta una tool explícitamente desde el sidebar, sin pasar por decisión del LLM
+    (spec-014). Por ahora solo `search_evidence` es `runnable` en `TOOLS_SIDEBAR_CATALOG`
+    (las tools con campos `list[object]` requeridos quedan chat-only, ver plan de sidebar).
+    """
+    tool_name = (action.payload or {}).get("tool_name")
+    if tool_name != "search_evidence":
+        await cl.Message(
+            content=(
+                f"`{tool_name}` todavía no se puede ejecutar desde el sidebar -- por ahora "
+                "pedíselo al asistente en el chat."
+            )
+        ).send()
+        return
+
+    response = await cl.AskUserMessage(
+        content="¿Qué querés buscar en los documentos indexados?", timeout=120
+    ).send()
+    query = (response or {}).get("output", "").strip() if response else ""
+    if not query:
+        await cl.Message(content="Búsqueda cancelada (sin consulta).").send()
+        return
+
+    tool_output = search_evidence({"query": query})
+    record = ToolCallRecord(
+        tool_name="search_evidence", tool_input={"query": query}, tool_output=tool_output
+    )
+    await _render_tool_call_step(record)
 
 
 # ---------------------------------------------------------------------------
