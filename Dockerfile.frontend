@@ -1,0 +1,18 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Instalar dependencias corre siempre DENTRO de esta imagen Docker (nunca en el host, ver
+# .ai/guardrails/restricted-ops.json): copiamos solo el manifest primero para cachear esta capa
+# entre rebuilds cuando el código cambia pero las deps no.
+COPY frontend/package.json ./
+RUN npm install # dentro del build de Docker, nunca en el host
+
+# El código real se bind-montea vía docker-compose.yml (volumen ./frontend:/app) para hot
+# reload en dev; este COPY solo cubre el caso de build de imagen sin el bind mount activo
+# (p. ej. un build de CI futuro).
+COPY frontend/ ./
+
+EXPOSE 5173
+
+CMD ["npm", "run", "dev"]

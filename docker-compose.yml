@@ -73,6 +73,30 @@ services:
       - audit-network
     restart: unless-stopped
 
+  # Frontend React (spec-020): reemplaza gradualmente al servicio `chainlit` de arriba, que
+  # sigue corriendo en paralelo hasta que este alcance paridad (ver plan de migración). Dev-mode
+  # (Vite dev server + proxy /api -> backend): el bind mount trae el código del host para hot
+  # reload; `npm install` corrió ya al construir la imagen (Dockerfile.frontend) sobre
+  # frontend/package.json, así que no hace falta re-instalar dependencias en cada arranque.
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    container_name: audit-workflow-frontend
+    ports:
+      - "5173:5173"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - audit-network
+    restart: unless-stopped
+
 volumes:
   chroma_data:
     driver: local
