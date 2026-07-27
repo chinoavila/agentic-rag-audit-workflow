@@ -1,19 +1,17 @@
 import { useState } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, useLocation } from "react-router-dom";
+import { useQuery } from "@tanstack/react-query";
 
-import { createProject, getChats, getProjects, getToolCatalog } from "@/data/mock";
+import { getChats, getProjects, getToolCatalog } from "@/data/mock";
+import { NewProjectModal } from "@/components/projects/NewProjectModal";
 
 // Primer corte de la Sidebar (tarea 1d/2b del plan): estructura + navegación real contra los
-// datos mock. Lo que falta a propósito para esta entrega (queda para 3c): modal completo de
-// "nuevo proyecto" (nombre + adjuntos + instrucciones + herramientas, ver el mockup) -- por
-// ahora "+ Nuevo proyecto" solo pide el nombre. El diseño visual (paleta, tipografía, spacing)
-// sí está portado 1:1 del mockup vía los tokens de tailwind.config.js.
+// datos mock. El diseño visual (paleta, tipografía, spacing) está portado 1:1 del mockup vía
+// los tokens de tailwind.config.js.
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
+  const [showNewProject, setShowNewProject] = useState(false);
   const location = useLocation();
-  const navigate = useNavigate();
-  const queryClient = useQueryClient();
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: getProjects });
   const toolsQuery = useQuery({ queryKey: ["tools"], queryFn: getToolCatalog });
@@ -22,20 +20,8 @@ export function Sidebar() {
     queryFn: () => getChats({ standalone: true }),
   });
 
-  const createProjectMutation = useMutation({
-    mutationFn: createProject,
-    onSuccess: (project) => {
-      queryClient.invalidateQueries({ queryKey: ["projects"] });
-      navigate(`/projects/${project.id}`);
-    },
-  });
-
-  const handleNewProject = () => {
-    const name = window.prompt("¿Cómo se llama el proyecto nuevo?");
-    if (name?.trim()) createProjectMutation.mutate(name.trim());
-  };
-
   return (
+    <>
     <aside
       className={`flex flex-shrink-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar-bg transition-[width] duration-200 ${
         collapsed ? "w-[60px]" : "w-[276px]"
@@ -81,7 +67,7 @@ export function Sidebar() {
               <button
                 className="flex h-5 w-5 items-center justify-center rounded text-text-faint hover:bg-bg-sunken hover:text-accent"
                 title="Nuevo proyecto"
-                onClick={handleNewProject}
+                onClick={() => setShowNewProject(true)}
               >
                 <PlusIcon />
               </button>
@@ -165,6 +151,8 @@ export function Sidebar() {
         )}
       </div>
     </aside>
+    {showNewProject && <NewProjectModal onClose={() => setShowNewProject(false)} />}
+    </>
   );
 }
 
