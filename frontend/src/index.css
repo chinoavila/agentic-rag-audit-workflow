@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tokens portados del mockup (sidebar-mockup.html). Ver tailwind.config.js: las utilidades
+   `bg-bg`, `text-text-dim`, etc. leen estas variables, así que un solo lugar controla ambos
+   temas sin duplicar clases. */
+:root {
+  --color-bg: #f2efe6;
+  --color-bg-raised: #ffffff;
+  --color-bg-sunken: #e7e3d7;
+  --color-text: #211c10;
+  --color-text-dim: #6d6552;
+  --color-text-faint: #94896f;
+  --color-border: #dcd6c6;
+  --color-sidebar-bg: #ebe6d8;
+  --color-sidebar-border: #d9d2bd;
+  --color-accent: #a2761f;
+  --color-accent-tint: rgba(162, 118, 31, 0.12);
+  --color-accent-tint-strong: rgba(162, 118, 31, 0.22);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #12151c;
+    --color-bg-raised: #191d26;
+    --color-bg-sunken: #0c0e13;
+    --color-text: #eef0f4;
+    --color-text-dim: #aab0bd;
+    --color-text-faint: #6b7180;
+    --color-border: #262c38;
+    --color-sidebar-bg: #0e1017;
+    --color-sidebar-border: #1f2430;
+    --color-accent: #d3a13c;
+    --color-accent-tint: rgba(211, 161, 60, 0.14);
+    --color-accent-tint-strong: rgba(211, 161, 60, 0.24);
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg text-text font-ui;
+  font-size: 14px;
+}
+
+.scrollbar-thin {
+  scrollbar-width: thin;
+}
+.scrollbar-thin::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-lg;
+}
