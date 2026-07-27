@@ -7,8 +7,7 @@ import { StatusPill } from "@/components/StatusPill";
 import { useRightPanel } from "@/context/RightPanelContext";
 import type { ChatMessage } from "@/types/domain";
 
-// Chat view (tarea 2b: acá se enchufa /api/chats/{id}/messages real, reemplazando
-// src/data/mock.ts::postMessage sin tocar el resto de este componente -- ver esa función).
+// Chat view: usa /api/chats/{id}/messages real vía src/lib/backend.ts::postMessage.
 // Sin streaming real (decisión del plan): revela `final_text` palabra por palabra, igual que
 // hacía `chainlit_ui/chat.py::_stream_chunks`.
 export function ChatRoute() {

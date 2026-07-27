@@ -180,15 +180,17 @@ def _dispatch_search_evidence(
 def _dispatch_create_finding(
     tool_input: dict[str, Any], db: Session | None, case_id: str | None = None
 ) -> dict[str, Any]:
-    del case_id  # create_finding ya recibe case_id dentro de tool_input (regla de dominio).
-    return create_finding(tool_input, db=db)
+    # `case_id` ya no es parte de lo que el LLM completa (ver `app/tools/create_finding.py`,
+    # `input_schema` sin esa property) -- se inyecta acá desde el contexto real del chat
+    # (spec-020), nunca desde algo que el LLM haya podido inventar.
+    return create_finding({**tool_input, "case_id": case_id}, db=db)
 
 
 def _dispatch_generate_report(
     tool_input: dict[str, Any], db: Session | None, case_id: str | None = None
 ) -> dict[str, Any]:
-    del case_id  # generate_report ya recibe case_id dentro de tool_input (regla de dominio).
-    return generate_report(tool_input, db=db)
+    # Ídem `_dispatch_create_finding` -- ver `app/tools/generate_report.py`.
+    return generate_report({**tool_input, "case_id": case_id}, db=db)
 
 
 TOOL_DISPATCH: dict[str, Any] = {

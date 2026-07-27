@@ -78,7 +78,19 @@ class CreateFindingInput(BaseModel):
 
 # JSON Schema listo para declarar como `input_schema` de la tool ante el LLM
 # (`agentic-core` debe importar esto directo, nunca reescribirlo como texto).
+#
+# `case_id` se quita de lo que el LLM ve y puede completar (spec-020): el LLM no tiene forma
+# confiable de conocer el uuid real del `Chat.case_id` en el que está, y dejarlo como campo
+# libre lo empuja a inventar un id (`"caso_001"`, etc.) que nunca existe. `agentic_core.loop`
+# threadea el `case_id` real desde `run_agent_turn` y `_dispatch_create_finding`
+# (`tools_registry.py`) lo inyecta en `tool_input` antes de validar -- mismo criterio de
+# "identidad/scope nunca viene del LLM" que ya aplica `triggered_by`/`approved_by` en esta
+# misma tool. `CreateFindingInput.case_id` sigue siendo un campo real y requerido: se sigue
+# validando tal cual, solo deja de estar en el schema que ve el LLM.
 input_schema: dict[str, Any] = CreateFindingInput.model_json_schema()
+input_schema["properties"].pop("case_id", None)
+if "case_id" in input_schema.get("required", []):
+    input_schema["required"].remove("case_id")
 
 
 # ---------------------------------------------------------------------------

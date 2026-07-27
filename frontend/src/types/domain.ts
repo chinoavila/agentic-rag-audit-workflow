@@ -1,7 +1,5 @@
-// Tipos del dominio (espejo de app/schemas/*.py). Mientras no está wireado el backend real
-// (tareas 2b/3c/4b del plan), estos tipos son también la forma que devuelve `src/data/mock.ts`
-// -- migrar de mock a `apiFetch` real no debería requerir tocar los componentes, solo el
-// `queryFn` de cada `useQuery` (ver src/lib/api.ts).
+// Tipos del dominio (espejo de app/schemas/*.py). Es la forma que devuelve `src/lib/backend.ts`
+// para cada `queryFn`/`mutationFn` de `useQuery`/`useMutation`.
 
 export type ToolKind = "ro" | "write";
 

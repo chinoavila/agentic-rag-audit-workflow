@@ -1,7 +1,6 @@
-// Cliente real contra el backend FastAPI -- reemplaza src/data/mock.ts. Mismos nombres de
-// función/misma forma de retorno que el mock (por diseño, ver ese archivo), así que cada
-// componente solo cambió el import de "@/data/mock" a "@/lib/backend"; ningún componente
-// tuvo que cambiar su lógica de useQuery/useMutation.
+// Cliente real contra el backend FastAPI, vía src/lib/api.ts::apiFetch. Cada función devuelve
+// la forma de src/types/domain.ts para que los componentes la consuman con useQuery/useMutation
+// sin lógica adicional.
 
 import { apiFetch } from "@/lib/api";
 import type {

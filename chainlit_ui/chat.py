@@ -441,10 +441,17 @@ async def on_message(message: cl.Message) -> None:
     SQLite local. `run_agent_turn` recibe esa sesión y la reenvía tal cual a `create_finding`.
     """
     conversation_history: list[dict] = cl.user_session.get("conversation_history") or []
+    case_id: str = cl.user_session.get("case_id")
 
     db = SessionLocal()
     try:
-        result: AgentTurnResult = await run_agent_turn(message.content, conversation_history, db)
+        # `case_id` real de la sesión (spec-020): `create_finding`/`generate_report` ya no
+        # aceptan `case_id` como parte de lo que completa el LLM (ver
+        # `app/tools/create_finding.py`) -- lo inyecta `_dispatch_create_finding` a partir de
+        # esto, threadeado por `run_agent_turn`.
+        result: AgentTurnResult = await run_agent_turn(
+            message.content, conversation_history, db, case_id=case_id
+        )
     finally:
         db.close()
 

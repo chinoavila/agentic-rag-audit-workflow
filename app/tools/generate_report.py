@@ -88,7 +88,14 @@ class GenerateReportInput(BaseModel):
 
 
 # JSON Schema listo para declarar como `input_schema` de la tool ante el LLM.
+#
+# `case_id` se quita de lo que el LLM ve (spec-020, mismo criterio que `create_finding.py`):
+# no tiene forma confiable de conocer el uuid real del `Chat.case_id` en el que está.
+# `_dispatch_generate_report` (`tools_registry.py`) lo inyecta server-side antes de validar.
 input_schema: dict[str, Any] = GenerateReportInput.model_json_schema()
+input_schema["properties"].pop("case_id", None)
+if "case_id" in input_schema.get("required", []):
+    input_schema["required"].remove("case_id")
 
 
 # ---------------------------------------------------------------------------

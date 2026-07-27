@@ -2,10 +2,8 @@
 // Vite las proxea a BACKEND_URL (ver vite.config.ts), en producción nginx hace lo mismo
 // (Dockerfile.frontend, tarea 6 del plan) -- así el bundle nunca hornea una URL de backend.
 //
-// Todavía sin uso real (tarea 1d: solo scaffold + datos mock, ver src/data/mock.ts). Las
-// tareas 2b/3c/4b reemplazan cada `queryFn`/`mutationFn` mock por una llamada a `apiFetch`
-// contra el endpoint real correspondiente -- la forma de los tipos (src/types/domain.ts) ya
-// está pensada para no cambiar en ese momento.
+// Consumido por src/lib/backend.ts, que expone cada endpoint con la forma de
+// src/types/domain.ts.
 
 export class ApiError extends Error {
   constructor(
