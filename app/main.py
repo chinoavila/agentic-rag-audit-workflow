@@ -8,8 +8,11 @@ Servicios:
 - /api/tools/: Audit tools invocation (placeholder)
 """
 
+import os
+
 from fastapi import FastAPI, status
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -20,7 +23,7 @@ from app.errors import (
     unhandled_exception_handler,
     validation_exception_handler,
 )
-from app.routers import audit_cases, findings, rag_retrieval, reports
+from app.routers import audit_cases, chats, findings, rag_retrieval, reports
 
 # Aseguramos que los modelos ORM estén importados (y por lo tanto registrados en
 # `Base.metadata`) antes de crear las tablas en el startup event de abajo.
@@ -33,6 +36,18 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Frontend React (spec-020): un SPA en un origen distinto (Vite dev server, :5173 por default)
+# necesita CORS explícito para llamar esta API. `allow_credentials=False` es deliberado: no hay
+# auth real todavía (`app/deps.py::get_current_user` es un stub fijo) así que no hay
+# cookies/sesión que proteger -- revisar cuando `security-compliance` implemente auth real.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("FRONTEND_ORIGINS", "http://localhost:5173").split(","),
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Contrato de error uniforme (spec-010): toda excepción responde {"detail": ..., "code": ...}
 # con un status code del set documentado (200, 201, 400, 401, 403, 404, 422, 500).
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)
@@ -40,6 +55,7 @@ app.add_exception_handler(RequestValidationError, validation_exception_handler)
 app.add_exception_handler(Exception, unhandled_exception_handler)
 
 app.include_router(audit_cases.router)
+app.include_router(chats.router)
 app.include_router(findings.router)
 app.include_router(rag_retrieval.router)
 app.include_router(reports.router)
