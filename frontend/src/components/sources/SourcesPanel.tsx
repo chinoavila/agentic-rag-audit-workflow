@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { addProjectSources, getProjectSources, removeProjectSource } from "@/data/mock";
+import { addProjectSources, getProjectSources } from "@/lib/backend";
 
-// Fuentes adjuntas a un proyecto (ver mockup): dropzone con drag&drop + selector nativo, lista
-// con tamaño y botón de quitar. Backend real (tarea 3a-3b del plan): esto pasa a ser
-// `POST/GET /api/audit-cases/{id}/files`, ingestando cada archivo en Chroma taggeado con el
-// `case_id` real -- buscable junto con la normativa general desde `search_evidence`, sin tool
-// nueva (ver plan de migración).
+// Fuentes adjuntas a un proyecto: dropzone con drag&drop + selector nativo, lista con tamaño.
+// Real contra `POST/GET /api/audit-cases/{id}/files`: cada archivo se ingesta en Chroma
+// taggeado con el `case_id` real -- buscable junto con la normativa general desde
+// `search_evidence`, sin tool nueva. Sin botón de "quitar" a propósito: `CaseFile` es
+// append-only en el backend real (mismo criterio que Finding/Report), no hay DELETE.
 export function SourcesPanel({ caseId }: { caseId: string }) {
   const queryClient = useQueryClient();
   const [dragOver, setDragOver] = useState(false);
@@ -22,10 +22,6 @@ export function SourcesPanel({ caseId }: { caseId: string }) {
 
   const addMutation = useMutation({
     mutationFn: (files: File[]) => addProjectSources(caseId, files),
-    onSuccess: invalidate,
-  });
-  const removeMutation = useMutation({
-    mutationFn: (fileId: string) => removeProjectSource(caseId, fileId),
     onSuccess: invalidate,
   });
 
@@ -76,22 +72,12 @@ export function SourcesPanel({ caseId }: { caseId: string }) {
       ) : (
         <div className="flex flex-col">
           {sources.map((file) => (
-            <div key={file.id} className="group flex items-center gap-3 rounded px-2.5 py-2.5 hover:bg-bg-raised">
+            <div key={file.id} className="flex items-center gap-3 rounded px-2.5 py-2.5 hover:bg-bg-raised">
               <span className="text-text-faint">📄</span>
               <div className="min-w-0 flex-1">
                 <div className="truncate text-[13.5px] font-medium">{file.name}</div>
                 <div className="text-[11.5px] text-text-faint">{file.sizeLabel}</div>
               </div>
-              <button
-                className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded text-text-faint opacity-0 hover:bg-bg-sunken hover:text-flag group-hover:opacity-100"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  removeMutation.mutate(file.id);
-                }}
-                title="Quitar"
-              >
-                🗑
-              </button>
             </div>
           ))}
         </div>

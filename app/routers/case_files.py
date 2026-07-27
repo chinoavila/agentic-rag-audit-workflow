@@ -64,14 +64,15 @@ async def upload_case_file(
     )
 
     # `ingest_document` necesita un path real en disco (extractors PDF/DOCX/XLSX leen del
-    # filesystem) -- se escribe a un archivo temporal con la extensión original para que
-    # `validate_supported_format` (basada en la extensión) lo acepte.
-    suffix = Path(filename).suffix
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
-        tmp.write(content)
-        tmp.flush()
+    # filesystem) -- se escribe a un directorio temporal preservando el NOMBRE ORIGINAL (no
+    # `NamedTemporaryFile`, que le pondría un nombre random): `ingest_document` deriva `source`
+    # de `file_path.name` cuando no se pasa `base_dir`, así que la cita en `search_evidence`
+    # debe mostrar el nombre real que subió el humano, no un nombre de archivo temporal.
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir) / filename
+        tmp_path.write_bytes(content)
         try:
-            result = ingest_document(Path(tmp.name), get_collection(), case_id=case_id)
+            result = ingest_document(tmp_path, get_collection(), case_id=case_id)
         except UnsupportedFormatError as exc:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { addProjectTool, getProjectTools, getToolCatalog, removeProjectTool, updateProjectTool } from "@/data/mock";
+import { addProjectTool, getProjectTools, getToolCatalog, removeProjectTool, updateProjectTool } from "@/lib/backend";
 import { Switch } from "@/components/Switch";
 import type { ToolCatalogEntry, ToolInstance } from "@/types/domain";
 

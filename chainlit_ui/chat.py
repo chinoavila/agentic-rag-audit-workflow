@@ -543,15 +543,6 @@ async def _resolve_finding_action(action: cl.Action, *, approve: bool) -> None:
     ).send()
 
 
-@cl.action_callback("spike_ping")
-async def on_spike_ping(action: cl.Action) -> None:
-    """Handler del spike descartable de Fase 0 (ver docstring en `on_chat_start`):
-    confirma que un click en el CustomElement del sidebar hace round-trip real a Python
-    vía `callAction`. Se borra junto con `_Spike.jsx` una vez confirmado.
-    """
-    await cl.Message(content=f"spike_ping recibido: payload={action.payload!r}").send()
-
-
 @cl.action_callback("approve_finding")
 async def on_approve_finding(action: cl.Action) -> None:
     await _resolve_finding_action(action, approve=True)

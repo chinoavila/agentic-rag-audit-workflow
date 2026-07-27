@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getReport, setReportStatus } from "@/data/mock";
+import { getReport, setReportStatus } from "@/lib/backend";
 import { StatusPill } from "@/components/StatusPill";
 import { useRightPanel } from "@/context/RightPanelContext";
 

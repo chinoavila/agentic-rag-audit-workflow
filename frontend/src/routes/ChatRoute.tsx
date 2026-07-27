@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { createChat, getChat, getMessages, getProject, postMessage } from "@/data/mock";
+import { createChat, getChat, getMessages, getProject, postMessage } from "@/lib/backend";
 import { StatusPill } from "@/components/StatusPill";
 import { useRightPanel } from "@/context/RightPanelContext";
 import type { ChatMessage } from "@/types/domain";

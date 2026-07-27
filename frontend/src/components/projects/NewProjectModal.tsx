@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 
-import { createProject } from "@/data/mock";
+import { createProject } from "@/lib/backend";
 import { Modal } from "@/components/Modal";
 
 // Reemplaza el `window.prompt()` placeholder (diálogo nativo del navegador, sin estilo ni

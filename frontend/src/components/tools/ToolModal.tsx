@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { createTool, updateTool } from "@/data/mock";
+import { createTool, updateTool } from "@/lib/backend";
 import { Modal } from "@/components/Modal";
 import type { ToolAction, ToolCatalogEntry, ToolKind } from "@/types/domain";
 

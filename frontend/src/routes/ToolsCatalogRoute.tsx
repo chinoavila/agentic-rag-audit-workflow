@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getToolCatalog, setToolInstalled } from "@/data/mock";
+import { getToolCatalog, setToolInstalled } from "@/lib/backend";
 import { Switch } from "@/components/Switch";
 import { ToolModal } from "@/components/tools/ToolModal";
 import type { ToolCatalogEntry } from "@/types/domain";

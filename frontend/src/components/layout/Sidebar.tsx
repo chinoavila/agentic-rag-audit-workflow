@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
-import { getChats, getProjects, getToolCatalog } from "@/data/mock";
+import { getChats, getProjects, getToolCatalog } from "@/lib/backend";
 import { NewProjectModal } from "@/components/projects/NewProjectModal";
 
 // Primer corte de la Sidebar (tarea 1d/2b del plan): estructura + navegación real contra los

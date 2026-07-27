@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { createChat, getChats, getProject, getReports } from "@/data/mock";
+import { createChat, getChats, getProject, getReports } from "@/lib/backend";
 import { SourcesPanel } from "@/components/sources/SourcesPanel";
 import { StatusPill } from "@/components/StatusPill";
 import { ToolsPanel } from "@/components/tools/ToolsPanel";
