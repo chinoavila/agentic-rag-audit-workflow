@@ -38,6 +38,15 @@ export interface ToolInstance {
   allowedActionIds: string[];
 }
 
+// Archivo adjunto a un proyecto (tab "Fuentes" de ProjectRoute, ver mockup). En el backend real
+// esto es `CaseFile` (tarea 3a-3b del plan): se ingesta en Chroma taggeado con `case_id` real,
+// buscable junto con la normativa general vía `search_evidence`.
+export interface CaseFile {
+  id: string;
+  name: string;
+  sizeLabel: string;
+}
+
 export interface Project {
   id: string;
   name: string;

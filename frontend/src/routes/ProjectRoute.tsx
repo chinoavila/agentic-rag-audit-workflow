@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createChat, getChats, getProject, getReports } from "@/data/mock";
+import { SourcesPanel } from "@/components/sources/SourcesPanel";
 import { StatusPill } from "@/components/StatusPill";
 import { ToolsPanel } from "@/components/tools/ToolsPanel";
 import { useRightPanel } from "@/context/RightPanelContext";
@@ -129,9 +130,7 @@ export function ProjectRoute() {
             <EmptyTab text="Todavía no se generó ningún informe en este proyecto." />
           ))}
 
-        {tab === "sources" && (
-          <EmptyTab text="Fuentes por proyecto: pendiente de CaseFile (tarea 3a-3b del plan)." />
-        )}
+        {tab === "sources" && <SourcesPanel caseId={project.id} />}
         {tab === "tools" && <ToolsPanel caseId={project.id} />}
       </div>
     </div>
