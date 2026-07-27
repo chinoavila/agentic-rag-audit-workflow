@@ -32,6 +32,31 @@ No hay ningún LLM generativo descargado ni corriendo en el host/contenedores: t
 
 ---
 
+## Arquitectura (resumen)
+
+```mermaid
+flowchart LR
+    FE["Frontend React\n:5173 (activo)"]
+    CL["Chainlit\n:8001 (legacy, en migración)"]
+    BE["backend FastAPI\n:8000"]
+    GROQ[("Groq API")]
+    CHROMA[("Chroma")]
+    SQLITE[("SQLite")]
+
+    FE -- "REST /api/*" --> BE
+    BE --> GROQ & CHROMA & SQLITE
+    CL -. "importa app.* directamente\n(no pasa por la API HTTP)" .-> GROQ & CHROMA & SQLITE
+```
+
+`chainlit` y `backend` son contenedores independientes que **no se hablan por HTTP**: `chainlit`
+importa los mismos módulos Python del backend y comparte los volúmenes `chroma_data`/
+`sqlite_data` directamente. `frontend` sí es un cliente HTTP real contra `backend` (con CORS).
+
+Diagramas completos — secuencia del loop de tool-calling, pipeline de ingesta RAG y modelo de
+datos — en [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
 ## Estructura de Carpetas
 
 ```
@@ -178,6 +203,7 @@ Restricciones que deben respetarse:
 
 ## Referencias
 
+- Arquitectura: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 - Specs: `.ai/specs/rag/`, `.ai/specs/audit/`, `.ai/specs/platform/`
 - Skills: `.ai/skills/docker-deployment/`, `.ai/skills/vectorstore-chroma-faiss/`
 - Guardrails: `.ai/guardrails/restricted-ops.json`

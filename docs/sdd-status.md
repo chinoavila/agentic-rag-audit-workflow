@@ -8,30 +8,37 @@ estado de implementación.
 
 ## Estado de Especificaciones (SDD)
 
-Este primer slice implementa y valida las siguientes especificaciones:
+**79 tests** (70 passing, 9 skipped intencionalmente — los 9 skips corresponden exactamente a
+las specs 007 y 013, las únicas dos aún sin implementar).
 
 | Spec | Dominio | Estado | Tests | Descripción |
 |------|---------|--------|-------|-------------|
-| **001** | RAG | ✅ Implementada | Pasando | Grounding y citación: respuestas incluyen referencias [1][2] a chunks recuperados |
+| **001** | RAG | ✅ Implementada | Pasando | Grounding y citación: respuestas incluyen referencias a chunks recuperados |
 | **002** | RAG | ✅ Implementada | Pasando | Ingesta idempotente: reingestar los mismos docs no crea duplicados en índice |
-| **003** | Audit Tools | 🟡 Parcial | Indirecto | Invocación segura de tools: parcialmente cubierta por defensa en 005 |
+| **003** | Audit Tools | ✅ Implementada | Pasando | Invocación segura de tools: errores estructurados, nunca excepción cruda hacia/desde el LLM |
 | **004** | Database | ✅ Implementada | Pasando | Inmutabilidad audit trail: tabla append-only, nunca DELETE, solo soft-supersede |
-| **005** | Security | 🟡 Parcial | Pasando (1 skip) | Defensa contra prompt injection en documentos: sanitización, test de `triggered_by` en skip (ver gaps) |
-| **006** | UI | 🟡 Parcial | Sin test spec | Human-in-the-loop: implementado en `chainlit_ui/chat.py` vía `cl.Action` approve/reject_finding |
-| **007** | Backend | ❌ Pendiente | Skip | Autenticación real: actualmente stub con usuario fijo `dev-user-0` (spec-007) |
+| **005** | Security | ✅ Implementada | Pasando | Defensa contra prompt injection en documentos: wrapping `<untrusted_context>`, `triggered_by` (human/llm) |
+| **006** | UI | ✅ Implementada | Pasando | Human-in-the-loop: aprobar/rechazar hallazgos y reportes vía `cl.Action`/endpoints explícitos |
+| **007** | Backend | ❌ Pendiente | Skip | Autenticación real: actualmente stub con usuario fijo `dev-user-0` (`app/deps.py`) |
 | **008** | RAG | ✅ Implementada | Pasando | Umbral de relevancia: filtro configurable en retrieval |
-| **009** | — | ❌ Pendiente | — | No implementada en este slice |
+| **009** | Platform | ✅ Implementada | Pasando | Entorno Docker reproducible |
 | **010** | Backend | ✅ Implementada | Pasando | Contrato de error uniforme: respuestas de error estructuradas |
-| **011** | Audit Tools | ❌ Pendiente | — | Inmutabilidad de reportes generados |
-| **012** | Audit Tools | ❌ Pendiente | — | Generación de informes desde plantilla |
-| **013** | RAG | ❌ Pendiente | — | Exposición dinámica de tools vía retrieval |
+| **011** | Audit Tools | ✅ Implementada | Pasando | Inmutabilidad de reportes generados: append-only, soft-supersede (`app/models/report.py`) |
+| **012** | Audit Tools | ✅ Implementada | Pasando | Generación de informes desde plantilla + rúbricas automáticas (`app/reports/`) |
+| **013** | RAG | ❌ Pendiente | Skip | Exposición dinámica de tools vía retrieval |
 
 **Resumen:**
-- **Completamente implementadas:** 001, 002, 004, 008, 010 (5 specs)
-- **Parcialmente implementadas:** 003, 005, 006 (3 specs — implementación presente pero sin test spec completo o con gaps conocidos)
-- **Pendientes:** 007, 009, 011, 012, 013 (5 specs — para próximos slices)
+- **Completamente implementadas:** 001, 002, 003, 004, 005, 006, 008, 009, 010, 011, 012 (11 specs)
+- **Pendientes:** 007 (auth real), 013 (tool retrieval dinámico) — 2 specs para próximo slice
 
-Para el contenido completo de cada spec, revisar `.ai/specs/rag/`, `.ai/specs/audit/` y `.ai/specs/platform/`.
+Además del catálogo formal de arriba, el código referencia specs informales (014, 017, 018,
+020) introducidas junto con la migración a frontend React — cubren el catálogo de tools,
+proyectos/chats persistentes (`Chat`/`Message`/`CaseFile`/`ProjectTool`) y el sidebar de
+Chainlit. No tienen todavía un spec doc SDD dedicado ni test spec propio; ver los comentarios
+en código (`app/models/*`, `app/routers/*`, `chainlit_ui/chat.py`) para su alcance real.
+
+Para el contenido completo de cada spec formal, revisar `.ai/specs/rag/`, `.ai/specs/audit/` y
+`.ai/specs/platform/`.
 
 ---
 
@@ -41,12 +48,11 @@ Los siguientes gaps son conocidos, no son bugs escondidos, y están documentados
 
 | Gap | Impacto | Dueño | Próximo Paso |
 |-----|---------|-------|--------------|
-| **Falta columna `triggered_by` en `Finding`** | Imposible rastrear si hallazgo fue creado por LLM vs. humano. Bloquea test `test_action_records_triggered_by_source` en `spec-005`. | `audit-tools` (tool) + `backend-api` (modelo/migración) | Agregar campo, migración, lógica de guardado. |
 | **Sin allowlist de tools según contexto** | LLM puede invocar tools incluso si la instrucción vino de contenido del documento (riesgo de prompt injection). Parcialmente mitigado por diseño turn-based + prompt. | `agentic-core` + `chainlit-ui` | Implementar allowlist estructural en runtime. |
 | **Sin redacción/filtrado de PII** | Contenido de chunks re-expuesto al LLM puede contener PII sin sanitizar. | `rag-engineer` o `security-compliance` | Agregar pipeline de redacción en retrieval. |
-| **Auth es stub (dev-user-0 fijo)** | Sin aislamiento real de datos por usuario. Viola spec-007. | `backend-api` | Implementar auth real (JWT, OIDC, etc.) con aislamiento de datos. |
+| **Auth es stub (dev-user-0 fijo)** | Sin aislamiento real de datos por usuario. Bloquea spec-007. | `backend-api` | Implementar auth real (JWT, OIDC, etc.) con aislamiento de datos. |
 
-Todos estos gaps quedan para el próximo slice (specs 007, 011, 012, 013 y ampliación de 005-006).
+Estos gaps quedan para el próximo slice (specs 007 y 013).
 
 ---
 
@@ -82,17 +88,21 @@ Todos estos gaps quedan para el próximo slice (specs 007, 011, 012, 013 y ampli
 - Documentación de gaps conocidos
 
 **Task 8: Testing** ✅ COMPLETADA (testing)
-- Tests pytest para specs implementadas (46 passing, 1 skipped)
+- Tests pytest para specs implementadas (70 passing, 9 skipped)
 - Evaluación de retrieval y contrato de herramientas
 
-**Task 9: Documentation** 🔄 EN PROGRESO (documentation)
+**Task 9: Documentation** ✅ COMPLETADA (documentation)
 - README.md con estado verificado
 - Instrucciones de setup/build/run exactas
 - Tabla de estado de specs
 - Documentación de gaps y próximos pasos
 
+Desde este slice inicial ya se sumó, además, la migración a frontend React (specs informales
+014/017/018/020: chats/proyectos persistentes, catálogo de tools, exportación de informes a
+.docx/.pdf) corriendo en paralelo a Chainlit — ver [Arquitectura](ARCHITECTURE.md).
+
 ---
 
-**Versión:** 0.1.0-e2e-slice-1
-**Última actualización:** 2026-07-25
-**Próximo hito:** Slice 2 (Specs 007, 011, 012, 013 — Auth real, reportes generados, tool retrieval dinámico)
+**Última actualización:** 2026-07-27
+**Próximo hito:** cerrar spec-007 (auth real) y spec-013 (tool retrieval dinámico); formalizar
+las specs informales 014/017/018/020 con su spec doc SDD y test spec propios.

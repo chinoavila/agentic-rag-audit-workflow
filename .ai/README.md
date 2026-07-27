@@ -38,21 +38,25 @@ Reviewer**.
 | [docker-deployment](skills/docker-deployment/SKILL.md) | `deployment` |
 
 ### Specs SDD (ver [SPEC_TEMPLATE.md](specs/SPEC_TEMPLATE.md))
-| Spec | Carpeta | Test |
-|---|---|---|
-| spec-001 Grounding & Citación obligatoria | `specs/rag/` | `tests/specs/test_spec_001_*.py` |
-| spec-002 Ingesta idempotente | `specs/rag/` | `tests/specs/test_spec_002_*.py` |
-| spec-003 Invocación segura de tools | `specs/audit/` | `tests/specs/test_spec_003_*.py` |
-| spec-004 Inmutabilidad del audit trail | `specs/audit/` | `tests/specs/test_spec_004_*.py` |
-| spec-005 Defensa anti prompt-injection | `specs/rag/` | `tests/specs/test_spec_005_*.py` |
-| spec-006 Human-in-the-loop | `specs/audit/` | `tests/specs/test_spec_006_*.py` |
-| spec-007 Aislamiento de sesión/auth | `specs/platform/` | `tests/specs/test_spec_007_*.py` |
-| spec-008 Umbral de relevancia | `specs/rag/` | `tests/specs/test_spec_008_*.py` |
-| spec-009 Entorno Docker reproducible | `specs/platform/` | `tests/specs/test_spec_009_*.py` |
-| spec-010 Contrato de error de API | `specs/platform/` | `tests/specs/test_spec_010_*.py` |
-| spec-011 Inmutabilidad de reportes generados | `specs/audit/` | `tests/specs/test_spec_011_*.py` |
-| spec-012 Generación de informes desde plantilla | `specs/audit/` | `tests/specs/test_spec_012_*.py` |
-| spec-013 Exposición dinámica de tools vía retrieval | `specs/rag/` | `tests/specs/test_spec_013_*.py` |
+| Spec | Carpeta | Test | Estado |
+|---|---|---|---|
+| spec-001 Grounding & Citación obligatoria | `specs/rag/` | `tests/specs/test_spec_001_*.py` | ✅ |
+| spec-002 Ingesta idempotente | `specs/rag/` | `tests/specs/test_spec_002_*.py` | ✅ |
+| spec-003 Invocación segura de tools | `specs/audit/` | `tests/specs/test_spec_003_*.py` | ✅ |
+| spec-004 Inmutabilidad del audit trail | `specs/audit/` | `tests/specs/test_spec_004_*.py` | ✅ |
+| spec-005 Defensa anti prompt-injection | `specs/rag/` | `tests/specs/test_spec_005_*.py` | ✅ |
+| spec-006 Human-in-the-loop | `specs/audit/` | `tests/specs/test_spec_006_*.py` | ✅ |
+| spec-007 Aislamiento de sesión/auth | `specs/platform/` | `tests/specs/test_spec_007_*.py` | ❌ pendiente |
+| spec-008 Umbral de relevancia | `specs/rag/` | `tests/specs/test_spec_008_*.py` | ✅ |
+| spec-009 Entorno Docker reproducible | `specs/platform/` | `tests/specs/test_spec_009_*.py` | ✅ |
+| spec-010 Contrato de error de API | `specs/platform/` | `tests/specs/test_spec_010_*.py` | ✅ |
+| spec-011 Inmutabilidad de reportes generados | `specs/audit/` | `tests/specs/test_spec_011_*.py` | ✅ |
+| spec-012 Generación de informes desde plantilla | `specs/audit/` | `tests/specs/test_spec_012_*.py` | ✅ |
+| spec-013 Exposición dinámica de tools vía retrieval | `specs/rag/` | `tests/specs/test_spec_013_*.py` | ❌ pendiente |
+
+El código también referencia specs informales (014, 017, 018, 020 — migración a frontend
+React: chats/proyectos persistentes, catálogo de tools, exportación de informes) sin spec doc
+SDD ni test spec dedicados todavía; ver comentarios en `app/models/*` y `app/routers/*`.
 
 ### Guardrails y Handoffs
 - [guardrails/restricted-ops.json](guardrails/restricted-ops.json) — bloqueos hard/soft, consumido por `.claude/hooks/pre-tool-guard.ps1`
@@ -60,14 +64,14 @@ Reviewer**.
 
 ## Estado de los tests
 
-**Slice 1 (actual):**
-- **46 tests pasando**: specs 001, 002, 004, 005 (parcial), 008, 010
-- **1 test skip intencional**: `test_action_records_triggered_by_source` en spec-005 (falta columna `triggered_by` en modelo `Finding`)
-- **31 tests deselected**: specs 003, 006, 007, 009, 011, 012, 013 (pendientes para próximos slices)
+- **70 tests pasando, 9 skipped intencionales** (los 9 skips son íntegramente spec-007 y
+  spec-013, las únicas dos specs formales aún sin implementar).
 
-Comando para ejecutar tests del slice 1:
+Comando para ejecutar la suite completa:
 ```bash
-docker compose run --rm backend python -m pytest -m "spec_001 or spec_002 or spec_004 or spec_005 or spec_008 or spec_010"
+docker compose run --rm backend python -m pytest
 ```
 
-Ver tabla de estado en [`../../README.md`](../../README.md#estado-de-especificaciones-sdd) para detalles de implementación por spec.
+Ver tabla de estado en [`../docs/sdd-status.md`](../docs/sdd-status.md) para detalles de
+implementación por spec, y [`../docs/ARCHITECTURE.md`](../docs/ARCHITECTURE.md) para los
+diagramas de arquitectura.

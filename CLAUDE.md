@@ -6,7 +6,8 @@ invocables por el LLM (tool-use). Prototipo de despliegue local manual vía Dock
 
 ## Stack
 
-- **UI conversacional**: Chainlit
+- **UI conversacional**: Chainlit (legacy, en migración) + Frontend React/Vite (en desarrollo
+  activo, la reemplaza gradualmente — ver `docs/ARCHITECTURE.md`)
 - **Backend**: Python + FastAPI
 - **RAG**: Chroma/FAISS local
 - **Orquestación del agente**: tool-calling/function-calling sobre el LLM (ver `.ai/skills/agentic-tool-use`)
