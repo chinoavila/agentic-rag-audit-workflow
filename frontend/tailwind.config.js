@@ -46,6 +46,20 @@ export default {
         DEFAULT: "10px",
         lg: "16px",
       },
+      // El default de Tailwind solo tiene pasos de .5 hasta 3.5 (0, 0.5, 1, 1.5, ..., 3, 3.5) y
+      // de a 1 entero después -- las clases que usan 4.5/5.5/6.5/7.5/8.5/13 (gap-4.5, h-6.5,
+      // px-4.5, h-13, etc., portadas del mockup) no existen en esa escala y Tailwind las
+      // generaba vacías (sin ninguna regla CSS), por eso los paddings/gaps/tamaños se veían
+      // colapsados. Se agregan como claves explícitas siguiendo el mismo múltiplo (n * 0.25rem)
+      // que usa el resto de la escala, en vez de reescribir cada className a `[…px]`.
+      spacing: {
+        "4.5": "1.125rem",
+        "5.5": "1.375rem",
+        "6.5": "1.625rem",
+        "7.5": "1.875rem",
+        "8.5": "2.125rem",
+        "13": "3.25rem",
+      },
     },
   },
   plugins: [],

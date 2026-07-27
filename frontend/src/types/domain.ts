@@ -20,6 +20,24 @@ export interface ToolCatalogEntry {
   actions: ToolAction[];
 }
 
+export interface ToolCatalogEntryDraft {
+  label: string;
+  key: string;
+  description: string;
+  kind: ToolKind;
+  actions: ToolAction[];
+}
+
+// Una herramienta agregada a un proyecto puntual (tab "Herramientas" de ProjectRoute, ver
+// mockup): `allowedActionIds` es un subconjunto de las `actions` de su `ToolCatalogEntry` --
+// permite restringir qué puede hacer la tool en ESTE proyecto sin afectar a otros.
+export interface ToolInstance {
+  key: string;
+  enabled: boolean;
+  confirm: boolean;
+  allowedActionIds: string[];
+}
+
 export interface Project {
   id: string;
   name: string;

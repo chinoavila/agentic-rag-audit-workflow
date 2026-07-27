@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createChat, getChats, getProject, getReports } from "@/data/mock";
 import { StatusPill } from "@/components/StatusPill";
+import { ToolsPanel } from "@/components/tools/ToolsPanel";
 import { useRightPanel } from "@/context/RightPanelContext";
 
 type Tab = "chats" | "sources" | "tools" | "reports";
@@ -131,9 +132,7 @@ export function ProjectRoute() {
         {tab === "sources" && (
           <EmptyTab text="Fuentes por proyecto: pendiente de CaseFile (tarea 3a-3b del plan)." />
         )}
-        {tab === "tools" && (
-          <EmptyTab text="Configuración de herramientas por proyecto: pendiente del catálogo dinámico (tarea 2a del plan)." />
-        )}
+        {tab === "tools" && <ToolsPanel caseId={project.id} />}
       </div>
     </div>
   );
