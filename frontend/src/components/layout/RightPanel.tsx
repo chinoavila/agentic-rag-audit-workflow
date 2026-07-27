@@ -6,8 +6,7 @@ import { useRightPanel } from "@/context/RightPanelContext";
 
 // Panel lateral derecho estilo "Artifact" (ver mockup): persiste montado independientemente de
 // qué ruta esté activa (controlado por RightPanelContext, no por la URL), igual que el panel de
-// artifacts de Claude. La exportación real a .docx/.pdf es la tarea 4a/4b -- por ahora el botón
-// dispara una descarga de texto plano, mismo placeholder honesto que ya tenía el mockup.
+// artifacts de Claude.
 export function RightPanel() {
   const { open, reportId, close } = useRightPanel();
   const queryClient = useQueryClient();
@@ -27,20 +26,16 @@ export function RightPanel() {
 
   const report = reportQuery.data;
 
+  // Descarga real (spec-020, tarea 4a): GET /api/reports/{id}/export?format= devuelve el
+  // archivo con Content-Disposition: attachment -- alcanza con navegar a la URL, el backend ya
+  // le pone el nombre de archivo correcto, no hace falta armar un Blob a mano en el cliente.
   const download = (format: "docx" | "pdf") => {
     if (!report) return;
-    const text = `${report.title}\n${"=".repeat(report.title.length)}\n\n${report.sections
-      .map((s) => `${s.heading.toUpperCase()}\n${s.body}`)
-      .join("\n\n")}`;
-    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url;
-    a.download = `${report.title.toLowerCase().replace(/[^a-z0-9]+/g, "_")}.${format}`;
+    a.href = `/api/reports/${report.id}/export?format=${format}`;
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(url);
   };
 
   return (
@@ -117,9 +112,6 @@ export function RightPanel() {
               >
                 Descargar .pdf
               </button>
-            </div>
-            <div className="text-center text-[10.5px] text-text-faint">
-              Exporta el texto tal cual se previsualiza arriba (export real: tarea 4a del plan).
             </div>
           </div>
         </div>

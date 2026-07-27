@@ -45,6 +45,12 @@ dependencies = [
     "pymupdf>=1.24.0",
     "pytesseract>=0.3.10",
 
+    # Exportación de informes a .docx/.pdf (spec-020, app/reports/exporters.py). xhtml2pdf en
+    # vez de weasyprint: puro Python, no agrega paquetes de sistema (Cairo/Pango) a
+    # Dockerfile.backend.
+    "markdown>=3.5.0",
+    "xhtml2pdf>=0.2.13",
+
     # LLM Client (Groq via OpenAI-compatible API)
     "openai>=1.0.0",
 

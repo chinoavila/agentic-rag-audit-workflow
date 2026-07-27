@@ -13,16 +13,24 @@ Mismo patrón que `app/routers/findings.py`:
 """
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.deps import CurrentUser, get_current_user
 from app.errors import api_error_detail
 from app.models.report import Report
+from app.reports.exporters import render_docx, render_pdf
 from app.reports.storage import read_report_blob
 from app.schemas.report import ReportOut, ReportPatch
+
+_EXPORT_CONTENT_TYPES = {
+    "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "pdf": "application/pdf",
+}
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -75,6 +83,28 @@ def get_report_content(
     """
     report = _get_report_or_404(db, report_id)
     return {"report_id": report.id, "content": read_report_blob(report.blob_path)}
+
+
+@router.get("/{report_id}/export")
+def export_report(
+    report_id: str,
+    format: Literal["docx", "pdf"],
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> Response:
+    """Exporta el informe renderizado a `.docx` o `.pdf` (spec-020), generado on-demand desde
+    el mismo blob que `GET /{report_id}/content` -- ver `app/reports/exporters.py`. Sin
+    cachear un segundo blob: re-renderizar markdown de este tamaño es despreciable.
+    """
+    report = _get_report_or_404(db, report_id)
+    rendered_markdown = read_report_blob(report.blob_path)
+    content = render_docx(rendered_markdown) if format == "docx" else render_pdf(rendered_markdown)
+    filename = f"{report.title.lower().replace(' ', '_')}.{format}"
+    return Response(
+        content=content,
+        media_type=_EXPORT_CONTENT_TYPES[format],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.patch("/{report_id}", response_model=ReportOut)
