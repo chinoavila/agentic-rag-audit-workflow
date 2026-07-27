@@ -168,7 +168,7 @@ async def post_chat_message(
     conversation_history = [_message_to_wire(m) for m in history_rows]
     history_len_before = len(conversation_history)
 
-    result = await run_agent_turn(payload.content, conversation_history, db)
+    result = await run_agent_turn(payload.content, conversation_history, db, case_id=chat.case_id)
 
     delta = result.conversation_history[history_len_before:]
     tool_idx = 0

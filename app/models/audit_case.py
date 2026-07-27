@@ -29,6 +29,10 @@ class AuditCase(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_new_uuid)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="open")
+    # Contexto/instrucciones libres para el asistente en todos los chats de este proyecto
+    # (frontend React, spec-020). Columna agregada después del lanzamiento inicial -- ver
+    # `app/main.py::_migrate_add_context_if_missing` para volúmenes `sqlite_data` viejos.
+    context: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     findings: Mapped[list["Finding"]] = relationship(  # noqa: F821

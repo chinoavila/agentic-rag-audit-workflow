@@ -207,8 +207,14 @@ def _format_search_evidence_result(result: dict[str, Any]) -> str:
     )
 
 
-def _execute_tool_call(tool_name: str, tool_input: dict[str, Any], db: Session) -> dict[str, Any]:
+def _execute_tool_call(
+    tool_name: str, tool_input: dict[str, Any], db: Session, case_id: str | None = None
+) -> dict[str, Any]:
     """Ejecuta una tool por nombre y devuelve SIEMPRE un dict (éxito o error estructurado).
+
+    `case_id` (spec-020): threadeado desde `run_agent_turn` -- viene del `Chat.case_id` real
+    (nunca del LLM), lo usan las tools que lo necesitan (`search_evidence`, para buscar
+    evidencia propia del proyecto además de la normativa general).
 
     Red de seguridad final (spec-003 regla 2): aunque `search_evidence`/`create_finding` ya
     capturan sus propios errores, esta función atrapa cualquier excepción no prevista (p. ej.
@@ -219,7 +225,7 @@ def _execute_tool_call(tool_name: str, tool_input: dict[str, Any], db: Session) 
     if handler is None:
         return {"error": f"Tool desconocida: {tool_name}", "code": "unknown_tool"}
     try:
-        return handler(tool_input, db)
+        return handler(tool_input, db, case_id)
     except Exception as exc:  # noqa: BLE001 - red de seguridad final (spec-003 regla 2)
         return {
             "error": f"Error inesperado ejecutando {tool_name}: {exc}",
@@ -248,6 +254,7 @@ async def run_agent_turn(
     user_message: str,
     conversation_history: list[dict[str, Any]],
     db: Session,
+    case_id: str | None = None,
 ) -> AgentTurnResult:
     """Ejecuta un turno completo del agente: mensaje humano -> loop de tool-calling -> respuesta.
 
@@ -260,6 +267,8 @@ async def run_agent_turn(
             `SYSTEM_PROMPT` (este loop lo antepone internamente en cada llamada). El loop no
             muta la lista recibida: trabaja sobre una copia.
         db: sesión de SQLAlchemy activa; se reenvía tal cual a la tool `create_finding`.
+        case_id: id real del `Chat.case_id` (spec-020), nunca del LLM -- se reenvía a
+            `_execute_tool_call` para las tools que lo necesiten (`search_evidence`).
 
     Returns:
         `AgentTurnResult`:
@@ -311,7 +320,7 @@ async def run_agent_turn(
                     "code": "invalid_input",
                 }
             else:
-                tool_output = _execute_tool_call(tool_name, tool_input, db)
+                tool_output = _execute_tool_call(tool_name, tool_input, db, case_id)
 
             tool_call_records.append(
                 ToolCallRecord(tool_name=tool_name, tool_input=tool_input, tool_output=tool_output)

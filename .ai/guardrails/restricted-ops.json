@@ -32,8 +32,8 @@
       "alternative": "docker compose down (sin -v)"
     },
     {
-      "pattern": "DELETE FROM (audit_trail|audit_findings|findings|reports)",
-      "reason": "El audit trail, los hallazgos y los reportes generados son append-only por requisito de integridad (ver spec-004, spec-011)",
+      "pattern": "DELETE FROM (audit_trail|audit_findings|findings|reports|case_files|chats|messages)",
+      "reason": "El audit trail, los hallazgos, los reportes generados, los archivos de proyecto y los chats son append-only por requisito de integridad (ver spec-004, spec-011, spec-020)",
       "alternative": "UPDATE ... SET superseded_by = <new_id> (soft-supersede, nunca DELETE)"
     },
     {

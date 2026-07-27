@@ -11,9 +11,21 @@ from app.db import get_db
 from app.deps import CurrentUser, get_current_user
 from app.errors import api_error_detail
 from app.models.audit_case import AuditCase
-from app.schemas.audit_case import AuditCaseCreate, AuditCaseOut
+from app.schemas.audit_case import AuditCaseCreate, AuditCaseOut, AuditCasePatch
 
 router = APIRouter(prefix="/api/audit-cases", tags=["audit-cases"])
+
+
+def _get_case_or_404(db: Session, case_id: str) -> AuditCase:
+    case = db.get(AuditCase, case_id)
+    if case is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=api_error_detail(
+                status.HTTP_404_NOT_FOUND, "Audit case not found", "audit_case_not_found"
+            ),
+        )
+    return case
 
 
 @router.post("", response_model=AuditCaseOut, status_code=status.HTTP_201_CREATED)
@@ -22,8 +34,8 @@ def create_audit_case(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> AuditCase:
-    """Crea un nuevo caso de auditoría."""
-    case = AuditCase(name=payload.name, status=payload.status)
+    """Crea un nuevo caso de auditoría (proyecto)."""
+    case = AuditCase(name=payload.name, status=payload.status, context=payload.context)
     db.add(case)
     db.commit()
     db.refresh(case)
@@ -54,12 +66,22 @@ def get_audit_case(
     current_user: CurrentUser = Depends(get_current_user),
 ) -> AuditCase:
     """Obtiene un caso de auditoría por id."""
-    case = db.get(AuditCase, case_id)
-    if case is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=api_error_detail(
-                status.HTTP_404_NOT_FOUND, "Audit case not found", "audit_case_not_found"
-            ),
-        )
+    return _get_case_or_404(db, case_id)
+
+
+@router.patch("/{case_id}", response_model=AuditCaseOut)
+def patch_audit_case(
+    case_id: str,
+    payload: AuditCasePatch,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> AuditCase:
+    """Edita nombre y/o contexto de un proyecto ya creado (spec-020)."""
+    case = _get_case_or_404(db, case_id)
+    if payload.name is not None:
+        case.name = payload.name
+    if payload.context is not None:
+        case.context = payload.context
+    db.commit()
+    db.refresh(case)
     return case

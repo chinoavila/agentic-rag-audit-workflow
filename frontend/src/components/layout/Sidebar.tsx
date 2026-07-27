@@ -40,7 +40,7 @@ export function Sidebar() {
             <div className="flex h-6.5 w-6.5 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-accent to-verdigris text-[13px] font-extrabold text-[#14110a]">
               A
             </div>
-            <div className="truncate text-[14.5px] font-semibold">Auditflow</div>
+            <div className="truncate text-[14.5px] font-semibold">Agentic Audit RAG Workflow</div>
           </div>
         )}
       </div>

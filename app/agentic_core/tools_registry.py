@@ -86,8 +86,12 @@ SEARCH_EVIDENCE_TOOL_SPEC: dict[str, Any] = {
 }
 
 
-def search_evidence(tool_input: dict[str, Any]) -> dict[str, Any]:
+def search_evidence(tool_input: dict[str, Any], case_id: str | None = None) -> dict[str, Any]:
     """Tool invocable por el LLM: recupera evidencia relevante vía `app.rag.retrieval.retrieve`.
+
+    `case_id`: NUNCA viene de `tool_input` (el LLM no lo controla, mismo criterio que
+    `decided_by`/`approved_by` en otras tools) -- lo inyecta `_dispatch_search_evidence` desde
+    el contexto real del chat (spec-020), threadeado desde `run_agent_turn`.
 
     Errores estructurados (agentic-tool-use regla 2 / spec-003): nunca deja propagar una
     excepción cruda al LLM, siempre devuelve `{"error": str, "code": str}` en caso de falla.
@@ -103,7 +107,9 @@ def search_evidence(tool_input: dict[str, Any]) -> dict[str, Any]:
         return {"error": f"top_k inválido: {top_k!r}", "code": "invalid_input"}
 
     try:
-        result = retrieve(query=query, top_k=top_k, similarity_threshold=SIMILARITY_THRESHOLD)
+        result = retrieve(
+            query=query, top_k=top_k, similarity_threshold=SIMILARITY_THRESHOLD, case_id=case_id
+        )
     except ValueError as exc:
         return {"error": str(exc), "code": "invalid_input"}
     except Exception as exc:  # noqa: BLE001 - red de seguridad final (spec-003 regla 2)
@@ -164,16 +170,24 @@ AGENT_TOOL_SPECS: list[dict[str, Any]] = [
 # `create_finding` lo reenvía tal cual a `app.tools.create_finding`.
 
 
-def _dispatch_search_evidence(tool_input: dict[str, Any], db: Session | None) -> dict[str, Any]:
+def _dispatch_search_evidence(
+    tool_input: dict[str, Any], db: Session | None, case_id: str | None = None
+) -> dict[str, Any]:
     del db  # search_evidence es de solo lectura sobre el vector store, no usa la DB de audit.
-    return search_evidence(tool_input)
+    return search_evidence(tool_input, case_id=case_id)
 
 
-def _dispatch_create_finding(tool_input: dict[str, Any], db: Session | None) -> dict[str, Any]:
+def _dispatch_create_finding(
+    tool_input: dict[str, Any], db: Session | None, case_id: str | None = None
+) -> dict[str, Any]:
+    del case_id  # create_finding ya recibe case_id dentro de tool_input (regla de dominio).
     return create_finding(tool_input, db=db)
 
 
-def _dispatch_generate_report(tool_input: dict[str, Any], db: Session | None) -> dict[str, Any]:
+def _dispatch_generate_report(
+    tool_input: dict[str, Any], db: Session | None, case_id: str | None = None
+) -> dict[str, Any]:
+    del case_id  # generate_report ya recibe case_id dentro de tool_input (regla de dominio).
     return generate_report(tool_input, db=db)
 
 

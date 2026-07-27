@@ -183,6 +183,7 @@ def ingest_document(
     collection: Collection | None = None,
     *,
     base_dir: Path | None = None,
+    case_id: str = "global",
 ) -> IngestionResult:
     """Ingesta idempotente de un único documento (load -> validate -> chunk -> embed -> upsert).
 
@@ -192,6 +193,16 @@ def ingest_document(
     Si no se pasa (default), el comportamiento es exactamente el de antes:
     `source = file_path.name`. Los call sites existentes (`ingest_directory`,
     tests) no pasan `base_dir` y no cambian de comportamiento.
+
+    `case_id`: spec-020 (aislamiento best-effort por proyecto). `"global"` (default) es lo que
+    usan `ingest_directory`/`ingest_directory_recursive` para el corpus general de
+    `docs/references/`; un archivo subido a un proyecto puntual (`app/routers/case_files.py`)
+    pasa el `case_id` real. `app/rag/retrieval.py::retrieve` hace una query adicional
+    filtrada por este campo cuando se le pasa un `case_id`, además de la query sin filtro de
+    siempre -- NO es un aislamiento estricto (el corpus `global` ingerido antes de este
+    campo existir no tiene `case_id` en su metadata, así que un filtro `where` excluyente
+    rompería la búsqueda general; ver docstring de `retrieve` para el detalle exacto de la
+    limitación conocida).
     """
     collection = collection or get_collection()
 
@@ -238,6 +249,7 @@ def ingest_document(
                 "page": chunk.section,
                 "doc_hash": doc_hash,
                 "ingested_at": ingested_at,
+                "case_id": case_id,
             }
             for chunk in chunks
         ]
@@ -295,6 +307,7 @@ def ingest_document(
                     "page": page,
                     "doc_hash": doc_hash,
                     "ingested_at": ingested_at,
+                    "case_id": case_id,
                 }
             )
 
