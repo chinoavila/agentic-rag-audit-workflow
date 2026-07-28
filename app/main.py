@@ -88,6 +88,7 @@ def _create_tables_if_missing() -> None:
     _migrate_add_context_if_missing()
     _migrate_add_archived_if_missing()
     _migrate_add_permission_mode_if_missing()
+    _migrate_add_tool_run_params_json_if_missing()
     _migrate_drop_tool_catalog_kind_if_present()
     _migrate_drop_project_tool_confirm_if_present()
     _seed_tool_catalog_if_missing()
@@ -170,6 +171,24 @@ def _migrate_add_permission_mode_if_missing() -> None:
                 "ALTER TABLE chats ADD COLUMN permission_mode VARCHAR(16) NOT NULL DEFAULT 'manual'"
             )
         )
+        conn.commit()
+
+
+def _migrate_add_tool_run_params_json_if_missing() -> None:
+    """Migración puntual: agrega `tool_runs.params_json` (spec-015, Task 10 -- ver docstring de
+    `app/models/tool_run.py`) si la tabla ya existía de una sesión anterior a este agregado
+    (p. ej. un contenedor que corrió con el esquema de Task 8, antes de que Task 10 agregara
+    esta columna). Mismo patrón exacto que `_migrate_add_permission_mode_if_missing` -- ver ese
+    docstring.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table("tool_runs"):
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("tool_runs")}
+    if "params_json" in existing_columns:
+        return
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE tool_runs ADD COLUMN params_json TEXT"))
         conn.commit()
 
 

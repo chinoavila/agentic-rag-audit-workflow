@@ -15,6 +15,18 @@ Task 9/10, no de este módulo.
 
 `permission_mode_snapshot` congela `Chat.permission_mode` vigente al momento del `INSERT` --
 no se recalcula ni se sobrescribe si el usuario cambia `Chat.permission_mode` después.
+
+Actualización (Task 10, spec-015): se agrega `params_json` respecto del slice de Task 8. Motivo:
+`app/agentic_core/tool_execution/sandbox.py::execute` (Task 9) tiene como ÚNICA firma
+`execute(tool_key, action_id, params)` -- nunca acepta un `argv`/comando ya armado como string.
+Para poder invocar el sandbox real en el momento de la aprobación/ejecución (Task 10) sin
+reconstruir `argv` parseando el texto libre de `command_resuelto` (posiblemente editado por un
+humano vía `PATCH`, lo que violaría spec-015 punto 1 -- "nunca se sustituye texto libre no
+validado en una posición del argv"), este módulo persiste también los parámetros estructurados
+originales (`dict[str, str]`, mismo shape que `AllowlistEntry.resolve_argv`) serializados como
+JSON. `command_resuelto` sigue siendo el campo que se muestra a humanos (nunca se usa para
+construir el `argv` real); `params_json` es lo único que efectivamente re-alimenta al sandbox
+en `app/services/tool_run_execution.py::execute_tool_run`.
 """
 
 import uuid
@@ -50,8 +62,16 @@ class ToolRun(Base):
     action_id: Mapped[str] = mapped_column(String(255), nullable=False)
 
     # `argv` real ya resuelto por la allowlist de security-compliance (Task 9/10) -- nunca el
-    # texto descriptivo de `ToolCatalogEntry.actions[].command`.
+    # texto descriptivo de `ToolCatalogEntry.actions[].command`. Exclusivamente para mostrar a
+    # humanos/auditoría: la ejecución real SIEMPRE re-resuelve el `argv` desde
+    # `(tool_key, action_id, params_json)` vía la allowlist -- nunca parsea este string (ver
+    # docstring del módulo).
     command_resuelto: Mapped[str] = mapped_column(String, nullable=False)
+
+    # JSON de los parámetros estructurados (`dict[str, str]`) con los que se propuso el
+    # comando -- insumo real de `sandbox.execute(tool_key, action_id, params)` en el momento de
+    # aprobar/ejecutar (Task 10). `None`/`"{}"` si la acción no admite parámetros variables.
+    params_json: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Congela `Chat.permission_mode` al momento del INSERT (status=proposed). Snapshot
     # histórico, nunca una referencia viva -- no se recalcula si `Chat.permission_mode`

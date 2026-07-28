@@ -6,11 +6,25 @@ debe agregar ningún `db.delete(...)` sobre esta tabla en este router. El único
 `superseded_by` acá porque, a diferencia de `Finding`/`Report`, no hay contenido editable a
 reemplazar, solo un ciclo de vida de aprobación.
 
-Este router modela exclusivamente la transición humana `proposed -> approved|rejected` (vía
-`PATCH`) y la lectura de propuestas por chat (`GET`). La creación de un `ToolRun` en
-`status=proposed`, y las transiciones hacia `executed`/`failed` que produce la ejecución real
-en el sandbox, son responsabilidad del loop agéntico y del sandbox de security-compliance
-(Task 9/10 del plan de migración) -- fuera de alcance de este módulo.
+Task 10 (spec-015) conecta este router con el sandbox REAL (`app/agentic_core/tool_execution/`,
+Task 9) a través de `app/services/tool_run_execution.py` -- ese módulo es la única
+implementación del ciclo `proposed -> approved -> executed/failed`; este router nunca invoca
+`sandbox.execute` directamente ni reimplementa esa orquestación.
+
+- `POST /api/chats/{chat_id}/tool-runs`: crea la propuesta (`status=proposed`), resolviendo
+  `command_resuelto` (solo para mostrar/auditar) vía la allowlist -- NUNCA ejecuta acá. Es la
+  interfaz que `agentic_core` (Task 12) invoca cuando el LLM propone una acción con `command`
+  real.
+- `PATCH /api/tool-runs/{id}`: transición humana `proposed -> approved|rejected`. Si el
+  resultado es `approved`, este endpoint invoca el sandbox real de inmediato y persiste
+  `executed`/`failed` -- nunca deja el `ToolRun` colgado en `status=approved` sin ejecutar. Un
+  `rejected` nunca invoca el sandbox.
+- `GET /api/chats/{chat_id}/tool-runs`: lectura de propuestas por chat.
+
+El camino directo de `permission_mode=auto` con origen humano verificado (`proposed ->
+executed/failed` sin pasar por `approved`) NO es un endpoint HTTP -- es
+`app/services/tool_run_execution.py::create_and_execute_tool_run`, invocable directo en-proceso
+por `agentic_core` (Task 12), documentado en el docstring de ese módulo.
 """
 
 from __future__ import annotations
@@ -22,8 +36,16 @@ from app.db import get_db
 from app.deps import CurrentUser, get_current_user
 from app.errors import api_error_detail
 from app.models.chat import Chat
+from app.models.tool_catalog_entry import ToolCatalogEntry
 from app.models.tool_run import ToolRun
-from app.schemas.tool_run import VALID_TOOL_RUN_PATCH_TRANSITIONS, ToolRunOut, ToolRunPatch, ToolRunStatus
+from app.schemas.tool_run import (
+    VALID_TOOL_RUN_PATCH_TRANSITIONS,
+    ToolRunCreate,
+    ToolRunOut,
+    ToolRunPatch,
+    ToolRunStatus,
+)
+from app.services.tool_run_execution import execute_tool_run, propose_tool_run
 
 router = APIRouter(tags=["tool-runs"])
 
@@ -50,6 +72,38 @@ def _get_chat_or_404(db: Session, chat_id: str) -> Chat:
     return chat
 
 
+@router.post(
+    "/api/chats/{chat_id}/tool-runs",
+    response_model=ToolRunOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def propose_tool_run_endpoint(
+    chat_id: str,
+    payload: ToolRunCreate,
+    db: Session = Depends(get_db),
+    current_user: CurrentUser = Depends(get_current_user),
+) -> ToolRun:
+    """Crea la propuesta de ejecución (`status=proposed`). Interfaz HTTP que `agentic_core`
+    (Task 12) invoca cuando el LLM propone ejecutar una acción con `command` real dentro de un
+    turno -- nunca ejecuta nada acá (ver `app/services/tool_run_execution.py::propose_tool_run`).
+
+    `permission_mode_snapshot` se congela desde `Chat.permission_mode` vigente en este momento.
+    `triggered_by="llm"` fijo server-side: este endpoint modela exclusivamente una propuesta
+    generada por el loop del agente (nunca aceptado del body, `ToolRunCreate` ni siquiera
+    declara ese campo).
+    """
+    chat = _get_chat_or_404(db, chat_id)
+    tool = db.get(ToolCatalogEntry, payload.tool_key)
+    if tool is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=api_error_detail(status.HTTP_404_NOT_FOUND, "Tool not found", "tool_not_found"),
+        )
+    return propose_tool_run(
+        db, chat, payload.tool_key, payload.action_id, payload.params, triggered_by="llm"
+    )
+
+
 @router.patch("/api/tool-runs/{tool_run_id}", response_model=ToolRunOut)
 def patch_tool_run(
     tool_run_id: str,
@@ -65,6 +119,14 @@ def patch_tool_run(
     contrato de error uniforme (spec-010, set de status codes restringido -- 409 no es un
     código documentado): un `ToolRun` ya resuelto (`approved`/`rejected`/`executed`/`failed`)
     es un estado terminal para este endpoint.
+
+    Task 10: si `payload.status == "approved"`, este endpoint invoca de inmediato el sandbox
+    REAL (`app/services/tool_run_execution.py::execute_tool_run`) y persiste el resultado --
+    nunca deja el `ToolRun` colgado en `status=approved` sin ejecutar. `command_resuelto`
+    editado (si vino en el payload) queda persistido para auditoría/visualización, pero la
+    ejecución real siempre re-resuelve el `argv` desde `(tool_key, action_id, params_json)` vía
+    la allowlist -- nunca desde este texto editado (spec-015, punto 1: nunca texto libre no
+    validado). Un `rejected` nunca invoca el sandbox.
     """
     tool_run = _get_tool_run_or_404(db, tool_run_id)
 
@@ -92,6 +154,10 @@ def patch_tool_run(
 
     db.commit()
     db.refresh(tool_run)
+
+    if payload.status == "approved":
+        tool_run = execute_tool_run(db, tool_run)
+
     return tool_run
 
 

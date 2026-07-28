@@ -45,6 +45,30 @@ class ToolRunOut(BaseModel):
     updated_at: datetime
 
 
+class ToolRunCreate(BaseModel):
+    """Payload de `POST /api/chats/{chat_id}/tool-runs` (Task 10).
+
+    Interfaz que `agentic_core` (Task 12) invoca cuando el LLM propone ejecutar una acción con
+    `command` real dentro de un turno. `tool_key`/`action_id` identifican la entrada de
+    `app/agentic_core/tool_execution/allowlist.py` a resolver -- nunca se acepta un `argv`/
+    comando ya armado del caller (eso lo resuelve el backend, nunca el LLM). `params` son los
+    valores variables tal como el LLM los completó en su `tool_call`, validados recién en el
+    momento de ejecutar (propose nunca ejecuta, solo intenta un preview de resolución para
+    mostrar en la UI -- ver `app/services/tool_run_execution.py`).
+
+    Deliberadamente sin `status`/`triggered_by`/`chat_id`/`permission_mode_snapshot`: todos se
+    fijan server-side (`status="proposed"`, `triggered_by="llm"`, `chat_id` viene de la ruta,
+    `permission_mode_snapshot` se lee de `Chat.permission_mode` vigente) -- nunca aceptados del
+    body de la request.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tool_key: str = Field(min_length=1, max_length=64)
+    action_id: str = Field(min_length=1, max_length=255)
+    params: dict[str, str] = Field(default_factory=dict)
+
+
 class ToolRunPatch(BaseModel):
     """Payload de `PATCH /api/tool-runs/{id}` (solo callable por un humano, nunca por el LLM).
 
