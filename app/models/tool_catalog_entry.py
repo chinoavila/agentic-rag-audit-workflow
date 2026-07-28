@@ -9,6 +9,15 @@ es texto descriptivo para humanos, nunca algo que el backend ejecute. Invocar un
 ejecutor registrado es, a propósito, una funcionalidad que todavía no existe (ver docstring de
 `app/routers/tools.py`): agregar ejecución real de comandos arbitrarios es una superficie de
 RCE que requiere su propio diseño de sandboxing/autorización, no algo para improvisar acá.
+
+Actualización (spec-015, Task 9 -- `app/agentic_core/tool_execution/`): ese diseño de
+sandboxing/autorización ya existe como módulo aislado (`allowlist.py` + `sandbox.py`), pero
+TODAVÍA no está conectado a ningún endpoint HTTP ni a la tabla `ToolRun` (Task 8/10,
+pendientes) -- `actions[].command` sigue siendo, hasta que esas tasks se completen, solo
+metadata que ningún camino del backend ejecuta. Cuando se conecte, la regla no-negociable
+documentada en `sandbox.py` sigue aplicando: el ejecutor nunca lee `label`/`description`/
+`kind` de esta entidad para decidir nada -- el único insumo válido es `(tool_key, action_id,
+params)` resuelto contra la allowlist versionada, nunca el texto de `command`.
 """
 
 import uuid

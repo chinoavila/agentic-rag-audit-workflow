@@ -31,6 +31,7 @@ from app.routers import (
     project_tools,
     rag_retrieval,
     reports,
+    tool_runs,
     tools,
 )
 
@@ -70,6 +71,7 @@ app.include_router(findings.router)
 app.include_router(project_tools.router)
 app.include_router(rag_retrieval.router)
 app.include_router(reports.router)
+app.include_router(tool_runs.router)
 app.include_router(tools.router)
 
 
@@ -85,7 +87,9 @@ def _create_tables_if_missing() -> None:
     _migrate_add_triggered_by_if_missing()
     _migrate_add_context_if_missing()
     _migrate_add_archived_if_missing()
+    _migrate_add_permission_mode_if_missing()
     _migrate_drop_tool_catalog_kind_if_present()
+    _migrate_drop_project_tool_confirm_if_present()
     _seed_tool_catalog_if_missing()
 
 
@@ -148,6 +152,27 @@ def _migrate_add_archived_if_missing() -> None:
         conn.commit()
 
 
+def _migrate_add_permission_mode_if_missing() -> None:
+    """Migración puntual: agrega `chats.permission_mode` (spec-015, gate de confirmación
+    humana antes de ejecutar un comando real) si la tabla ya existía de una sesión anterior a
+    este agregado. Mismo patrón exacto que `_migrate_add_archived_if_missing` -- ver ese
+    docstring.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table("chats"):
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("chats")}
+    if "permission_mode" in existing_columns:
+        return
+    with engine.connect() as conn:
+        conn.execute(
+            text(
+                "ALTER TABLE chats ADD COLUMN permission_mode VARCHAR(16) NOT NULL DEFAULT 'manual'"
+            )
+        )
+        conn.commit()
+
+
 def _migrate_drop_tool_catalog_kind_if_present() -> None:
     """Migración puntual (a la inversa de las de arriba): da de baja
     `tool_catalog_entries.kind` (`"ro" | "write"`) si la tabla ya existía de una sesión
@@ -190,6 +215,46 @@ def _migrate_drop_tool_catalog_kind_if_present() -> None:
         return
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE tool_catalog_entries DROP COLUMN kind"))
+        conn.commit()
+
+
+def _migrate_drop_project_tool_confirm_if_present() -> None:
+    """Migración puntual (mismo patrón exacto que `_migrate_drop_tool_catalog_kind_if_present`
+    -- ver ese docstring para el detalle completo del criterio): da de baja
+    `project_tools.confirm` (`bool`) si la tabla ya existía de una sesión anterior a su
+    eliminación del modelo/schemas/router (spec-015, Bloque 3). El campo era el único
+    remanente que anticipaba algo parecido a un permission mode antes de que el mecanismo
+    real (`Chat.permission_mode` + `ToolRun`) existiera -- queda huérfano funcionalmente,
+    reemplazado por esos dos artefactos nuevos (ver docstring de
+    `app/models/project_tool.py`).
+
+    Decisión: `ALTER TABLE ... DROP COLUMN` real (no dejar la columna huérfana sin exponer),
+    mismo criterio que la migración de `kind`: `project_tools` no es una tabla de audit trail
+    (spec-004 no aplica acá, ver docstring de `app/routers/project_tools.py`), así que no hay
+    ninguna razón de integridad para conservar la columna físicamente. Requiere SQLite 3.35+
+    (2021-03-12); se verifica `DATABASE_URL`/versión del motor antes de intentar el `ALTER
+    TABLE` y, si no lo soporta, se deja la columna físicamente presente pero no leída/escrita/
+    expuesta por ningún código (fallback seguro, no un error de arranque).
+    """
+    import sqlite3
+
+    inspector = inspect(engine)
+    if not inspector.has_table("project_tools"):
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("project_tools")}
+    if "confirm" not in existing_columns:
+        return
+    if not DATABASE_URL.startswith("sqlite"):
+        # Este proyecto solo corre sobre SQLite (ver app/db.py); si algún día cambia el motor,
+        # esta migración puntual necesita revisión antes de asumir que aplica sin cambios.
+        return
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        # Columna huérfana intencional: ningún modelo/schema/router de este codebase la lee,
+        # escribe ni expone (ver spec-015, Bloque 3) -- queda inerte hasta que el motor de
+        # SQLite disponible soporte DROP COLUMN.
+        return
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE project_tools DROP COLUMN confirm"))
         conn.commit()
 
 

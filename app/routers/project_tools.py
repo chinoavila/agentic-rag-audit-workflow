@@ -104,8 +104,6 @@ def patch_project_tool(
     project_tool = _get_project_tool_or_404(db, case_id, tool_key)
     if payload.enabled is not None:
         project_tool.enabled = payload.enabled
-    if payload.confirm is not None:
-        project_tool.confirm = payload.confirm
     if payload.allowed_action_ids is not None:
         project_tool.allowed_action_ids = payload.allowed_action_ids
     db.commit()

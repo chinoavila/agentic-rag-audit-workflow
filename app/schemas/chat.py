@@ -15,6 +15,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 ChatRole = Literal["user", "assistant", "tool"]
 
+# auto | accept_edit | manual (spec-015). Taxonomía cerrada, default "manual" (el más
+# conservador) en la creación de todo `Chat` -- ver `app/models/chat.py`. La única forma de
+# que valga "auto" es un PATCH explícito disparado por una acción humana (nunca el LLM, ver
+# `app/routers/chats.py::patch_chat`).
+PermissionMode = Literal["auto", "accept_edit", "manual"]
+
 
 class ChatCreate(BaseModel):
     """Payload para crear un chat. `case_id=None` => chat standalone."""
@@ -30,6 +36,7 @@ class ChatOut(BaseModel):
     case_id: str | None
     title: str | None
     archived: bool
+    permission_mode: PermissionMode
     created_at: datetime
     updated_at: datetime
 
@@ -39,12 +46,16 @@ class ChatPatch(BaseModel):
 
     `archived` es el soft-hide que dispara el botón de borrar del sidebar del frontend: nunca
     hay un DELETE real sobre `Chat` (ver docstring de `app/routers/chats.py`).
+
+    `permission_mode` (spec-015) es exclusivamente mutable por un caller humano vía este
+    mismo `PATCH` -- no existe ninguna tool ni endpoint invocable por el LLM que lo mute.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     title: str | None = Field(default=None, min_length=1, max_length=255)
     archived: bool | None = None
+    permission_mode: PermissionMode | None = None
 
 
 class MessageOut(BaseModel):

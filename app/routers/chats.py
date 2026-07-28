@@ -133,12 +133,17 @@ def patch_chat(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Chat:
-    """Edita `title` y/o `archived` de un chat (los mensajes son append-only, spec-020)."""
+    """Edita `title`/`archived`/`permission_mode` de un chat (los mensajes son append-only,
+    spec-020). `permission_mode` (spec-015) es exclusivamente humano: este endpoint es la
+    única vía de escritura del campo, nunca invocado por el loop del agente.
+    """
     chat = _get_chat_or_404(db, chat_id)
     if payload.title is not None:
         chat.title = payload.title
     if payload.archived is not None:
         chat.archived = payload.archived
+    if payload.permission_mode is not None:
+        chat.permission_mode = payload.permission_mode
     db.commit()
     db.refresh(chat)
     return chat

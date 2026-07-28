@@ -42,6 +42,16 @@ class Chat(Base):
     # flag solo saca el chat del listado por default, los mensajes siguen intactos.
     archived: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="0")
 
+    # auto | accept_edit | manual (spec-015). Gate de confirmación humana previo a la
+    # ejecución real de `ToolCatalogEntry.actions[].command` para este chat -- default
+    # conservador `manual`: ningún flujo del backend crea un Chat con `permission_mode=auto`
+    # por defecto (ver app/schemas/chat.py::PermissionMode). La única vía de escritura es
+    # `PATCH /api/chats/{id}` disparado por una acción humana; el LLM no tiene ninguna tool
+    # ni mecanismo para mutar este campo de su propia conversación.
+    permission_mode: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="manual", server_default="manual"
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False
     )

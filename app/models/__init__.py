@@ -8,6 +8,7 @@ from app.models.message import Message
 from app.models.project_tool import ProjectTool
 from app.models.report import Report
 from app.models.tool_catalog_entry import ToolCatalogEntry
+from app.models.tool_run import ToolRun
 
 __all__ = [
     "AuditCase",
@@ -18,5 +19,6 @@ __all__ = [
     "ProjectTool",
     "Report",
     "ToolCatalogEntry",
+    "ToolRun",
 ]
 
