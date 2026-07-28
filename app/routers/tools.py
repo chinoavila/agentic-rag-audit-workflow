@@ -68,7 +68,6 @@ def create_tool(
         key=key,
         label=payload.label,
         description=payload.description,
-        kind=payload.kind,
         installed=True,
         actions=[a.model_dump() for a in payload.actions],
     )
@@ -90,8 +89,6 @@ def patch_tool(
         tool.label = payload.label
     if payload.description is not None:
         tool.description = payload.description
-    if payload.kind is not None:
-        tool.kind = payload.kind
     if payload.installed is not None:
         tool.installed = payload.installed
     if payload.actions is not None:

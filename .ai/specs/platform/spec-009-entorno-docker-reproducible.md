@@ -9,8 +9,12 @@ adicionales, y sin perder datos entre reinicios.
 
 - [ ] `docker compose up` desde un checkout limpio levanta backend + chainlit + persistencia
       sin pasos manuales fuera de proveer `.env`.
-- [ ] El índice Chroma/FAISS y la DB del audit trail persisten en volúmenes nombrados que
-      sobreviven a `docker compose down` (sin `-v`).
+- [ ] El índice Chroma/FAISS y la DB del audit trail persisten en un mecanismo de host que
+      sobrevive a `docker compose down` (sin `-v`): la DB del audit trail vía volumen nombrado
+      (`sqlite_data`); el índice Chroma vía bind mount a `./data/chroma` (no un volumen nombrado
+      — decisión deliberada, ver `docs/plans/plan-tool-execution-permission-modes.md` sección 1:
+      el borrado del índice debe ser siempre una acción explícita del usuario sobre esa carpeta,
+      nunca un efecto secundario de un comando Docker sobre volúmenes).
 - [ ] `docker compose down -v` está documentado como destructivo y bloqueado por guardrail
       salvo confirmación explícita del usuario.
 - [ ] `.env.example` existe y contiene las mismas claves que `.env` (sin valores reales).

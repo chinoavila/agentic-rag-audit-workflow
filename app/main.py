@@ -17,7 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import inspect, text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.db import Base, engine
+from app.db import DATABASE_URL, Base, engine
 from app.errors import (
     http_exception_handler,
     unhandled_exception_handler,
@@ -85,6 +85,7 @@ def _create_tables_if_missing() -> None:
     _migrate_add_triggered_by_if_missing()
     _migrate_add_context_if_missing()
     _migrate_add_archived_if_missing()
+    _migrate_drop_tool_catalog_kind_if_present()
     _seed_tool_catalog_if_missing()
 
 
@@ -147,26 +148,68 @@ def _migrate_add_archived_if_missing() -> None:
         conn.commit()
 
 
+def _migrate_drop_tool_catalog_kind_if_present() -> None:
+    """Migración puntual (a la inversa de las de arriba): da de baja
+    `tool_catalog_entries.kind` (`"ro" | "write"`) si la tabla ya existía de una sesión
+    anterior a su eliminación del modelo/schemas/router (ver plan de migración, task 20). El
+    campo nunca gatilló ningún comportamiento real en el backend -- era puramente decorativo
+    para un badge visual del frontend -- y con el diseño de sandboxing que viene en la Fase C
+    de ese plan, toda tool con `command` real pasa por el mismo sandbox sin excepciones basadas
+    en metadata declarativa, así que mantenerlo sugeriría engañosamente una distinción de
+    seguridad que no existe.
+
+    Decisión: `ALTER TABLE ... DROP COLUMN` real (no dejar la columna huérfana sin exponer).
+    Se prefiere el borrado físico porque acá no aplica la restricción append-only del audit
+    trail (spec-004, `tool_catalog_entries` es catálogo de metadata, no un log de auditoría) y
+    porque dejar una columna físicamente presente pero "prohibida" es una trampa latente para
+    quien toque este archivo después (¿por qué existe si nada la usa?). `DROP COLUMN` requiere
+    SQLite 3.35+ (2021-03-12); la imagen de Docker del backend (`python:3.11-slim`, Debian
+    bookworm) trae libsqlite3 3.40+, así que corre sin problema ahí. Para no romper el arranque
+    en un entorno local fuera de Docker con un sqlite3 más viejo (el fallback de
+    `AUDIT_DATABASE_URL` a un archivo relativo al cwd, ver `app/db.py`), se verifica la versión
+    del motor antes de intentar el `ALTER TABLE` y, si no la soporta, se deja la columna
+    físicamente presente pero documentada como no leída/escrita/expuesta por ningún código
+    (fallback seguro, no un error de arranque).
+    """
+    import sqlite3
+
+    inspector = inspect(engine)
+    if not inspector.has_table("tool_catalog_entries"):
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("tool_catalog_entries")}
+    if "kind" not in existing_columns:
+        return
+    if not DATABASE_URL.startswith("sqlite"):
+        # Este proyecto solo corre sobre SQLite (ver app/db.py); si algún día cambia el motor,
+        # esta migración puntual necesita revisión antes de asumir que aplica sin cambios.
+        return
+    if sqlite3.sqlite_version_info < (3, 35, 0):
+        # Columna huérfana intencional: ningún modelo/schema/router de este codebase la lee,
+        # escribe ni expone (ver task 20 del plan de migración) -- queda inerte hasta que el
+        # motor de SQLite disponible soporte DROP COLUMN.
+        return
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE tool_catalog_entries DROP COLUMN kind"))
+        conn.commit()
+
+
 _SEED_TOOL_CATALOG: list[dict] = [
     {
         "key": "search_evidence",
         "label": "Buscar evidencia",
         "description": "Busca evidencia relevante en los documentos indexados (RAG) y devuelve citas con página y similitud.",
-        "kind": "ro",
         "actions": [{"id": "act_search", "label": "Buscar evidencia", "command": "internal:search_evidence"}],
     },
     {
         "key": "create_finding",
         "label": "Registrar hallazgo",
         "description": "Registra un hallazgo de auditoría con severidad, evidencia citada y risk score.",
-        "kind": "write",
         "actions": [{"id": "act_create_finding", "label": "Crear hallazgo", "command": "internal:create_finding"}],
     },
     {
         "key": "generate_report",
         "label": "Generar informe",
         "description": "Genera un informe desde una plantilla y corre las rúbricas automáticas antes de persistir.",
-        "kind": "write",
         "actions": [{"id": "act_generate_report", "label": "Generar borrador desde plantilla", "command": "internal:generate_report"}],
     },
 ]

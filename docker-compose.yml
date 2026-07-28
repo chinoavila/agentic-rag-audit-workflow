@@ -15,7 +15,7 @@ services:
       - REPORTS_BLOB_DIR=/data/reports
       - PYTHONUNBUFFERED=1
     volumes:
-      - chroma_data:/data/chroma
+      - ./data/chroma:/data/chroma
       - sqlite_data:/data
       # docs/references está en .gitignore (corpus de referencia local, ~50MB de PDFs) y no
       # se hornea en la imagen vía COPY: se bind-montea de solo lectura para no forzar un
@@ -55,7 +55,7 @@ services:
       - REPORTS_BLOB_DIR=/data/reports
       - PYTHONUNBUFFERED=1
     volumes:
-      - chroma_data:/data/chroma
+      - ./data/chroma:/data/chroma
       - sqlite_data:/data
       - chainlit_cache:/app/.chainlit
     healthcheck:
@@ -96,8 +96,6 @@ services:
     restart: unless-stopped
 
 volumes:
-  chroma_data:
-    driver: local
   sqlite_data:
     driver: local
   chainlit_cache:

@@ -19,7 +19,10 @@ class TestEntornoDockerReproducible:
         return project_root
 
     def test_docker_compose_config_defines_named_volumes_for_persistence(self):
-        """Parsea docker-compose.yml y confirma volúmenes nombrados para persistencia."""
+        """Parsea docker-compose.yml y confirma persistencia: sqlite_data como volumen nombrado,
+        Chroma como bind mount a ./data/chroma (decisión deliberada, no un volumen nombrado -- ver
+        docs/plans/plan-tool-execution-permission-modes.md sección 1: el borrado del índice debe ser
+        siempre una acción explícita del usuario sobre esa carpeta)."""
         project_root = self._get_project_root()
         docker_compose_path = project_root / "docker-compose.yml"
 
@@ -32,19 +35,17 @@ class TestEntornoDockerReproducible:
         assert "volumes" in compose, "docker-compose.yml debe tener sección 'volumes' top-level"
         volumes = compose["volumes"]
 
-        # Verificar que existen chroma_data y sqlite_data como volúmenes nombrados
-        assert "chroma_data" in volumes, "Volumen nombrado 'chroma_data' no encontrado"
+        # chroma_data ya NO es un volumen nombrado (migrado a bind mount, task 15 del plan)
+        assert "chroma_data" not in volumes, (
+            "chroma_data no debe ser un volumen nombrado -- el índice Chroma persiste vía bind "
+            "mount a ./data/chroma"
+        )
         assert "sqlite_data" in volumes, "Volumen nombrado 'sqlite_data' no encontrado"
-
-        # Verificar que son volúmenes locales
-        assert (
-            volumes["chroma_data"].get("driver") == "local"
-        ), "chroma_data debe usar driver: local"
         assert (
             volumes["sqlite_data"].get("driver") == "local"
         ), "sqlite_data debe usar driver: local"
 
-        # Verificar que el servicio 'backend' monta ambos volúmenes
+        # Verificar que el servicio 'backend' monta el bind mount de Chroma y el volumen de sqlite
         assert "services" in compose, "docker-compose.yml debe tener sección 'services'"
         backend = compose["services"].get("backend", {})
         assert backend, "Servicio 'backend' no encontrado"
@@ -54,10 +55,12 @@ class TestEntornoDockerReproducible:
 
         # Buscar los montes específicos en la lista de volúmenes
         volume_mount_strings = [str(v) for v in backend_volumes]
-        chroma_mounted = any("chroma_data" in v for v in volume_mount_strings)
+        chroma_bind_mounted = any(
+            v.startswith("./data/chroma:") or v.startswith("./data/chroma :") for v in volume_mount_strings
+        )
         sqlite_mounted = any("sqlite_data" in v for v in volume_mount_strings)
 
-        assert chroma_mounted, "backend debe montar chroma_data:/data/chroma"
+        assert chroma_bind_mounted, "backend debe montar ./data/chroma:/data/chroma (bind mount)"
         assert sqlite_mounted, "backend debe montar sqlite_data:/data"
 
     def test_env_example_keys_match_required_env_keys(self):

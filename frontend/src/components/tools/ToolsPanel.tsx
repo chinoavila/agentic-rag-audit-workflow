@@ -5,11 +5,6 @@ import { addProjectTool, getProjectTools, getToolCatalog, removeProjectTool, upd
 import { Switch } from "@/components/Switch";
 import type { ToolCatalogEntry, ToolInstance } from "@/types/domain";
 
-const KIND_META: Record<string, { label: string; className: string }> = {
-  ro: { label: "solo lectura", className: "bg-verdigris-tint text-verdigris" },
-  write: { label: "escribe", className: "bg-flag-tint text-flag" },
-};
-
 // Panel n8n-style (ver mockup): catálogo instalado a la izquierda (lo que no está agregado
 // todavía a ESTE proyecto), herramientas activas a la derecha, cada una expandible para
 // habilitar/deshabilitar, exigir confirmación, y restringir qué acciones puede ejecutar --
@@ -64,15 +59,11 @@ export function ToolsPanel({ caseId }: { caseId: string }) {
         ) : (
           <div className="flex flex-col gap-2.5">
             {available.map((tool) => {
-              const kind = KIND_META[tool.kind];
               return (
                 <div key={tool.key} className="rounded border border-border bg-bg-raised p-3.5">
                   <div className="text-[13px] font-semibold">{tool.label}</div>
                   <p className="mt-1 text-[11.5px] leading-relaxed text-text-faint">{tool.description}</p>
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className={`rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${kind.className}`}>
-                      {kind.label}
-                    </span>
+                  <div className="mt-2 flex items-center justify-end">
                     <button
                       className="rounded border border-border px-2.5 py-1 text-xs font-semibold hover:border-accent"
                       onClick={() => addMutation.mutate(tool.key)}
@@ -98,15 +89,11 @@ export function ToolsPanel({ caseId }: { caseId: string }) {
             {instances.map((ti) => {
               const def = byKey(ti.key);
               if (!def) return null;
-              const kind = KIND_META[def.kind];
               const expanded = expandedKey === ti.key;
               return (
                 <div key={ti.key} className="rounded border border-border bg-bg-raised p-3">
                   <div className="flex items-center gap-2">
                     <span className="text-[12.8px] font-semibold">{def.label}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${kind.className}`}>
-                      {kind.label}
-                    </span>
                     <div className="ml-auto flex gap-1">
                       <button
                         className="flex h-7 w-7 items-center justify-center rounded text-text-dim hover:bg-bg-sunken"

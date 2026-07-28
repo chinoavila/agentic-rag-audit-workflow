@@ -1,8 +1,6 @@
 // Tipos del dominio (espejo de app/schemas/*.py). Es la forma que devuelve `src/lib/backend.ts`
 // para cada `queryFn`/`mutationFn` de `useQuery`/`useMutation`.
 
-export type ToolKind = "ro" | "write";
-
 export interface ToolAction {
   id: string;
   label: string;
@@ -13,7 +11,6 @@ export interface ToolCatalogEntry {
   key: string;
   label: string;
   description: string;
-  kind: ToolKind;
   installed: boolean;
   actions: ToolAction[];
 }
@@ -22,7 +19,6 @@ export interface ToolCatalogEntryDraft {
   label: string;
   key: string;
   description: string;
-  kind: ToolKind;
   actions: ToolAction[];
 }
 

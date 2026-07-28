@@ -61,7 +61,7 @@
     },
     {
       "pattern": "chroma.*persist_directory|CHROMA_PERSIST",
-      "message": "Cambio en la ruta de persistencia de Chroma: verificar que el volumen de Docker sigue montado (spec-009)."
+      "message": "Cambio en la ruta de persistencia de Chroma: verificar que el directorio de bind mount (./data/chroma) existe con permisos correctos antes de docker compose up (spec-009)."
     }
   ],
   "business_rules": [

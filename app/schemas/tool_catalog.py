@@ -3,11 +3,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-ToolKind = Literal["ro", "write"]
 
 
 class ToolActionSchema(BaseModel):
@@ -26,7 +23,6 @@ class ToolCatalogEntryCreate(BaseModel):
     key: str | None = Field(default=None, max_length=64)
     label: str = Field(..., min_length=1, max_length=255)
     description: str = ""
-    kind: ToolKind = "write"
     actions: list[ToolActionSchema] = Field(default_factory=list)
 
 
@@ -35,7 +31,6 @@ class ToolCatalogEntryPatch(BaseModel):
 
     label: str | None = Field(default=None, min_length=1, max_length=255)
     description: str | None = None
-    kind: ToolKind | None = None
     installed: bool | None = None
     actions: list[ToolActionSchema] | None = None
 
@@ -46,7 +41,6 @@ class ToolCatalogEntryOut(BaseModel):
     key: str
     label: str
     description: str
-    kind: ToolKind
     installed: bool
     actions: list[ToolActionSchema]
     created_at: datetime

@@ -171,7 +171,6 @@ export async function createTool(draft: ToolCatalogEntryDraft): Promise<ToolCata
       key: draft.key || null,
       label: draft.label,
       description: draft.description,
-      kind: draft.kind,
       actions: draft.actions,
     }),
   });

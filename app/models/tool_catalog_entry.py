@@ -37,7 +37,6 @@ class ToolCatalogEntry(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     label: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str] = mapped_column(String, nullable=False, default="")
-    kind: Mapped[str] = mapped_column(String(16), nullable=False, default="write")  # "ro" | "write"
     installed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     # [{"id": str, "label": str, "command": str}, ...] -- ver docstring del módulo.

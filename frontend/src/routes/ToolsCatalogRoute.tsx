@@ -6,11 +6,6 @@ import { Switch } from "@/components/Switch";
 import { ToolModal } from "@/components/tools/ToolModal";
 import type { ToolCatalogEntry } from "@/types/domain";
 
-const KIND_META = {
-  ro: { label: "solo lectura", className: "bg-verdigris-tint text-verdigris" },
-  write: { label: "escribe", className: "bg-flag-tint text-flag" },
-};
-
 // Catálogo global: instalar una herramienta la hace disponible para agregar a cualquier
 // proyecto (ver ToolsPanel); desinstalarla no la quita de los proyectos que ya la tengan
 // agregada. "Instalar herramienta" / el ícono de engranaje abren el mismo ToolModal
@@ -43,7 +38,6 @@ export function ToolsCatalogRoute() {
       </p>
       <div className="mt-4.5 grid grid-cols-[repeat(auto-fill,minmax(230px,1fr))] gap-3">
         {toolsQuery.data?.map((tool) => {
-          const kind = KIND_META[tool.kind];
           return (
             <div key={tool.key} className="flex flex-col gap-2.5 rounded border border-border bg-bg-raised p-3.5">
               <div className="flex items-start gap-2.5">
@@ -64,10 +58,7 @@ export function ToolsCatalogRoute() {
                 {tool.actions.length} acción{tool.actions.length === 1 ? "" : "es"} definida
                 {tool.actions.length === 1 ? "" : "s"}
               </div>
-              <div className="flex items-center justify-between">
-                <span className={`rounded px-1.5 py-0.5 text-[9.5px] font-bold uppercase tracking-wide ${kind.className}`}>
-                  {kind.label}
-                </span>
+              <div className="flex items-center justify-end">
                 <label className="flex items-center gap-2 text-xs text-text-dim">
                   {tool.installed ? "Instalada" : "No instalada"}
                   <Switch

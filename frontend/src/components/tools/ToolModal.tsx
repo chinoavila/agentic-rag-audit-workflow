@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { createTool, updateTool } from "@/lib/backend";
 import { Modal } from "@/components/Modal";
-import type { ToolAction, ToolCatalogEntry, ToolKind } from "@/types/domain";
+import type { ToolAction, ToolCatalogEntry } from "@/types/domain";
 
 let draftActionUid = 0;
 const nextActionId = () => `draft_act_${++draftActionUid}`;
@@ -22,7 +22,6 @@ export function ToolModal({ existing, onClose }: ToolModalProps) {
   const [label, setLabel] = useState(existing?.label ?? "");
   const [key, setKey] = useState(existing?.key ?? "");
   const [description, setDescription] = useState(existing?.description ?? "");
-  const [kind, setKind] = useState<ToolKind>(existing?.kind ?? "write");
   const [actions, setActions] = useState<ToolAction[]>(
     existing?.actions.map((a) => ({ ...a })) ?? [{ id: nextActionId(), label: "", command: "" }],
   );
@@ -30,8 +29,8 @@ export function ToolModal({ existing, onClose }: ToolModalProps) {
   const mutation = useMutation({
     mutationFn: async () => {
       const clean = actions.filter((a) => a.label.trim() && a.command.trim());
-      if (existing) return updateTool(existing.key, { label: label.trim(), key, description: description.trim(), kind, actions: clean });
-      return createTool({ label: label.trim(), key, description: description.trim(), kind, actions: clean });
+      if (existing) return updateTool(existing.key, { label: label.trim(), key, description: description.trim(), actions: clean });
+      return createTool({ label: label.trim(), key, description: description.trim(), actions: clean });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["tools"] });
@@ -91,21 +90,6 @@ export function ToolModal({ existing, onClose }: ToolModalProps) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
           />
-        </Field>
-        <Field label="Tipo">
-          <div className="flex gap-1.5">
-            {(["ro", "write"] as ToolKind[]).map((k) => (
-              <button
-                key={k}
-                onClick={() => setKind(k)}
-                className={`flex-1 rounded-sm border px-2 py-2 text-xs font-semibold ${
-                  kind === k ? "border-accent bg-accent-tint" : "border-border bg-bg-sunken text-text-dim"
-                }`}
-              >
-                {k === "ro" ? "Solo lectura" : "Escribe / muta datos"}
-              </button>
-            ))}
-          </div>
         </Field>
         <Field label="Acciones y comandos" help="Cada acción es algo puntual que la herramienta puede hacer. El comando es lo que se ejecuta detrás.">
           <div className="flex flex-col gap-2.5">
