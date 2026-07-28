@@ -55,25 +55,25 @@ importar si lo invoca `chainlit_ui/chat.py` o `app/routers/chats.py` (frontend).
 sequenceDiagram
     actor Usuario as Usuario auditor
     participant UI as Frontend / Chainlit
-    participant Loop as agentic_core.run_agent_turn
+    participant Core as agentic_core.run_agent_turn
     participant LLM as Groq (LLM)
     participant Tools as TOOL_DISPATCH
     participant RAG as Chroma
     participant DB as SQLite (audit trail)
 
     Usuario->>UI: mensaje de chat
-    UI->>Loop: run_agent_turn(mensaje, historial, case_id)
+    UI->>Core: run_agent_turn(mensaje, historial, case_id)
     loop hasta MAX_TOOL_ITERATIONS=6 o respuesta final
-        Loop->>LLM: chat.completions.create(system fijo + historial, tools=AGENT_TOOL_SPECS)
-        LLM-->>Loop: texto final, o tool_calls
+        Core->>LLM: chat.completions.create(system fijo + historial, tools=AGENT_TOOL_SPECS)
+        LLM-->>Core: texto final, o tool_calls
         alt hay tool_calls
-            Loop->>Tools: ejecuta search_evidence / create_finding / generate_report
+            Core->>Tools: ejecuta search_evidence / create_finding / generate_report
             Tools->>RAG: similarity_search (search_evidence)
             Tools->>DB: INSERT append-only (create_finding / generate_report)
-            Tools-->>Loop: resultado estructurado (nunca excepción cruda, spec-003)
-            Note over Loop: chunks recuperados se envuelven en\n"&lt;untrusted_context&gt;" antes de\nvolver a entrar al historial (spec-005)
+            Tools-->>Core: resultado estructurado (nunca excepción cruda, spec-003)
+            Note over Core: chunks recuperados se envuelven en\n<untrusted_context> antes de\nvolver a entrar al historial (spec-005)
         else sin tool_calls
-            Loop-->>UI: final_text + tool_calls[] + historial actualizado
+            Core-->>UI: final_text + tool_calls[] + historial actualizado
         end
     end
     UI-->>Usuario: respuesta + un Step/card por tool call ejecutado
@@ -195,7 +195,7 @@ erDiagram
         string id PK
         string chat_id FK
         string role "user|assistant|tool"
-        string content "wire fidelity: incluye el wrapping &lt;untrusted_context&gt; tal cual"
+        string content "wire fidelity: incluye el wrapping <untrusted_context> tal cual"
         json tool_calls
         string report_id FK "solo si tool_name=generate_report sin error"
     }
