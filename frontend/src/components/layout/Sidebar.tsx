@@ -30,8 +30,10 @@ export function Sidebar() {
   // app/routers/chats.py. Si el proyecto/chat archivado es el que está abierto ahora mismo,
   // navega a "/" porque va a desaparecer de las listas que lo mantenían visible.
   const archiveMutation = useMutation({
-    mutationFn: (target: ArchiveTarget) =>
-      target.kind === "project" ? archiveProject(target.id) : archiveChat(target.id),
+    mutationFn: async (target: ArchiveTarget) => {
+      if (target.kind === "project") await archiveProject(target.id);
+      else await archiveChat(target.id);
+    },
     onSuccess: (_, target) => {
       queryClient.invalidateQueries({ queryKey: ["projects"] });
       queryClient.invalidateQueries({ queryKey: ["chats"] });
