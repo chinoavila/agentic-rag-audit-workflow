@@ -61,9 +61,6 @@ export function Sidebar() {
         </button>
         {!collapsed && (
           <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
-            <div className="flex h-6.5 w-6.5 flex-shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-accent to-verdigris text-[13px] font-extrabold text-[#14110a]">
-              A
-            </div>
             <div className="text-[13px] font-semibold leading-tight">Agentic Audit RAG Workflow</div>
           </div>
         )}
