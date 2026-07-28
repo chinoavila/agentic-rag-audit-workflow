@@ -53,6 +53,7 @@ Reviewer**.
 | spec-011 Inmutabilidad de reportes generados | `specs/audit/` | `tests/specs/test_spec_011_*.py` | ✅ |
 | spec-012 Generación de informes desde plantilla | `specs/audit/` | `tests/specs/test_spec_012_*.py` | ✅ |
 | spec-013 Exposición dinámica de tools vía retrieval | `specs/rag/` | `tests/specs/test_spec_013_*.py` | ❌ pendiente |
+| spec-015 Ejecución de comandos con permission modes + ToolRun | `specs/audit/` | `tests/specs/test_spec_015_*.py` | ❌ pendiente |
 
 El código también referencia specs informales (014, 017, 018, 020 — migración a frontend
 React: chats/proyectos persistentes, catálogo de tools, exportación de informes) sin spec doc
@@ -64,8 +65,8 @@ SDD ni test spec dedicados todavía; ver comentarios en `app/models/*` y `app/ro
 
 ## Estado de los tests
 
-- **70 tests pasando, 9 skipped intencionales** (los 9 skips son íntegramente spec-007 y
-  spec-013, las únicas dos specs formales aún sin implementar).
+- **70 tests pasando, ~49 skipped intencionales** (los skips corresponden a spec-007, spec-013
+  y spec-015, las tres specs formales aún sin implementar).
 
 Comando para ejecutar la suite completa:
 ```bash

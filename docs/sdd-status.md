@@ -8,8 +8,8 @@ estado de implementación.
 
 ## Estado de Especificaciones (SDD)
 
-**79 tests** (70 passing, 9 skipped intencionalmente — los 9 skips corresponden exactamente a
-las specs 007 y 013, las únicas dos aún sin implementar).
+**~119 tests** (70 passing, ~49 skipped intencionalmente — los skips corresponden a
+las specs 007, 013 y 015, aún sin implementar).
 
 | Spec | Dominio | Estado | Tests | Descripción |
 |------|---------|--------|-------|-------------|
@@ -26,10 +26,11 @@ las specs 007 y 013, las únicas dos aún sin implementar).
 | **011** | Audit Tools | ✅ Implementada | Pasando | Inmutabilidad de reportes generados: append-only, soft-supersede (`app/models/report.py`) |
 | **012** | Audit Tools | ✅ Implementada | Pasando | Generación de informes desde plantilla + rúbricas automáticas (`app/reports/`) |
 | **013** | RAG | ❌ Pendiente | Skip | Exposición dinámica de tools vía retrieval |
+| **015** | Backend/Tools | ❌ Pendiente | Skip | Ejecución de comandos con permission modes de chat y ToolRun append-only |
 
 **Resumen:**
 - **Completamente implementadas:** 001, 002, 003, 004, 005, 006, 008, 009, 010, 011, 012 (11 specs)
-- **Pendientes:** 007 (auth real), 013 (tool retrieval dinámico) — 2 specs para próximo slice
+- **Pendientes:** 007 (auth real), 013 (tool retrieval dinámico con allowlist estructural), 015 (ejecución de comandos con sandbox + permission modes) — 3 specs para próximos slices
 
 Además del catálogo formal de arriba, el código referencia specs informales (014, 017, 018,
 020) introducidas junto con la migración a frontend React — cubren el catálogo de tools,
@@ -103,6 +104,7 @@ Desde este slice inicial ya se sumó, además, la migración a frontend React (s
 
 ---
 
-**Última actualización:** 2026-07-27
-**Próximo hito:** cerrar spec-007 (auth real) y spec-013 (tool retrieval dinámico); formalizar
+**Última actualización:** 2026-07-28
+**Próximo hito:** cerrar spec-007 (auth real), spec-013 (tool retrieval dinámico con allowlist estructural)
+y spec-015 (ejecución de comandos con sandbox + permission modes de chat); formalizar
 las specs informales 014/017/018/020 con su spec doc SDD y test spec propios.
