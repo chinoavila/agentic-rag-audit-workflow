@@ -27,8 +27,8 @@ flowchart LR
     BE --> SQLITE
 
     CL -. "importa app.* directamente:\nmismo código, proceso separado,\nNO pasa por la API HTTP del backend" .-> GROQ
-    CL -. --> CHROMA
-    CL -. --> SQLITE
+    CL -.-> CHROMA
+    CL -.-> SQLITE
 ```
 
 **Puntos no obvios:**
@@ -71,7 +71,7 @@ sequenceDiagram
             Tools->>RAG: similarity_search (search_evidence)
             Tools->>DB: INSERT append-only (create_finding / generate_report)
             Tools-->>Loop: resultado estructurado (nunca excepción cruda, spec-003)
-            Note over Loop: chunks recuperados se envuelven en\n<untrusted_context> antes de\nvolver a entrar al historial (spec-005)
+            Note over Loop: chunks recuperados se envuelven en\n"&lt;untrusted_context&gt;" antes de\nvolver a entrar al historial (spec-005)
         else sin tool_calls
             Loop-->>UI: final_text + tool_calls[] + historial actualizado
         end
@@ -195,7 +195,7 @@ erDiagram
         string id PK
         string chat_id FK
         string role "user|assistant|tool"
-        string content "wire fidelity: incluye el wrapping <untrusted_context> tal cual"
+        string content "wire fidelity: incluye el wrapping &lt;untrusted_context&gt; tal cual"
         json tool_calls
         string report_id FK "solo si tool_name=generate_report sin error"
     }
@@ -216,7 +216,8 @@ erDiagram
     TOOL_CATALOG_ENTRY {
         string key PK "coincide con TOOL_DISPATCH cuando hay ejecutor real"
         string label
-        string kind "ro|write"
+        string description
+        json actions "[{id, label, command}, ...], metadata-only"
         bool installed
     }
 ```
