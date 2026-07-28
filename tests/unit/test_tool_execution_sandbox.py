@@ -25,6 +25,7 @@ ameritan una corrida real de confirmación (ver reporte de la task).
 
 from __future__ import annotations
 
+import ast
 import os
 import sys
 
@@ -195,7 +196,14 @@ class TestSandboxExecute:
         monkeypatch.setattr(sandbox, "get_entry", lambda *a, **k: entry)
         result = sandbox.execute("_test_tool", "_test_action", {})
         assert result["status"] == "executed"
-        assert (result["stdout"] or "").strip() == "[]"
+        # LC_CTYPE puede aparecer solo: CPython lo inyecta él mismo al arrancar con env
+        # vacío (PEP 538, coerción de locale C -> UTF-8) -- no es un leak, no es una
+        # credencial. Lo que importa es que nada del backend (proxy, API keys) esté presente.
+        child_env_keys = set(ast.literal_eval((result["stdout"] or "[]").strip()))
+        assert child_env_keys <= {"LC_CTYPE", "LC_ALL", "LANG"}
+        assert "HTTP_PROXY" not in child_env_keys
+        assert "GROQ_API_KEY" not in child_env_keys
+        assert "AUDIT_DATABASE_URL" not in child_env_keys
 
     def test_timeout_is_killed_and_marked_failed_structured(self, monkeypatch):
         entry = _entry(

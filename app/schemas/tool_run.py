@@ -49,7 +49,8 @@ class ToolRunPatch(BaseModel):
     """Payload de `PATCH /api/tool-runs/{id}` (solo callable por un humano, nunca por el LLM).
 
     `status` solo admite `approved`/`rejected` -- son las únicas transiciones que un caller
-    humano puede disparar explícitamente vía este endpoint (ver `_VALID_PATCH_TRANSITIONS`).
+    humano puede disparar explícitamente vía este endpoint (ver
+    `VALID_TOOL_RUN_PATCH_TRANSITIONS`).
     Las transiciones hacia `executed`/`failed` las escribe el ejecutor real del sandbox
     (Task 9/10), no este payload.
     """
