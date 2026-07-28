@@ -21,6 +21,14 @@ export default defineConfig({
     // localhost) -- sin esto, la app ni siquiera carga para ellos (pantalla en blanco con
     // ese mensaje, antes de que corra una sola línea de React).
     allowedHosts: true,
+    // Bind mount sobre Windows (Docker Desktop): los eventos de filesystem nativos no siempre
+    // llegan al watcher de Vite dentro del contenedor, así que las ediciones en el host se
+    // sirven recién tras un restart manual en vez de HMR real. Polling es más lento pero
+    // confiable en ese escenario -- ver docs/ARCHITECTURE.md.
+    watch: {
+      usePolling: true,
+      interval: 300,
+    },
     proxy: {
       "/api": {
         target: process.env.BACKEND_URL || "http://localhost:8000",
