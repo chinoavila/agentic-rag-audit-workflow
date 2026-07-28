@@ -49,9 +49,10 @@ def list_audit_cases(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> list[AuditCase]:
-    """Lista casos de auditoría, paginado (`skip`/`limit`, ver fastapi SKILL regla 2)."""
+    """Lista casos de auditoría no archivados, paginado (`skip`/`limit`, ver fastapi SKILL regla 2)."""
     return (
         db.query(AuditCase)
+        .filter(AuditCase.status != "archived")
         .order_by(AuditCase.created_at.desc())
         .offset(skip)
         .limit(limit)
@@ -76,12 +77,14 @@ def patch_audit_case(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> AuditCase:
-    """Edita nombre y/o contexto de un proyecto ya creado (spec-020)."""
+    """Edita nombre, contexto y/o status de un proyecto ya creado (spec-020)."""
     case = _get_case_or_404(db, case_id)
     if payload.name is not None:
         case.name = payload.name
     if payload.context is not None:
         case.context = payload.context
+    if payload.status is not None:
+        case.status = payload.status
     db.commit()
     db.refresh(case)
     return case

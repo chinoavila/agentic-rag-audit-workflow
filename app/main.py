@@ -84,6 +84,7 @@ def _create_tables_if_missing() -> None:
     Base.metadata.create_all(bind=engine)
     _migrate_add_triggered_by_if_missing()
     _migrate_add_context_if_missing()
+    _migrate_add_archived_if_missing()
     _seed_tool_catalog_if_missing()
 
 
@@ -127,6 +128,22 @@ def _migrate_add_context_if_missing() -> None:
         return
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE audit_cases ADD COLUMN context TEXT"))
+        conn.commit()
+
+
+def _migrate_add_archived_if_missing() -> None:
+    """Migración puntual: agrega `chats.archived` (botón de borrar/archivar en el sidebar del
+    frontend) si la tabla ya existía de una sesión anterior a este agregado. Mismo patrón que
+    `_migrate_add_context_if_missing` -- ver ese docstring.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table("chats"):
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("chats")}
+    if "archived" in existing_columns:
+        return
+    with engine.connect() as conn:
+        conn.execute(text("ALTER TABLE chats ADD COLUMN archived BOOLEAN NOT NULL DEFAULT 0"))
         conn.commit()
 
 

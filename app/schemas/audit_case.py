@@ -29,13 +29,15 @@ class AuditCaseOut(BaseModel):
 
 
 class AuditCasePatch(BaseModel):
-    """Único mecanismo de edición de un proyecto ya creado: nombre y/o contexto.
+    """Edición de un proyecto ya creado: nombre, contexto y/o status.
 
-    `status` no se edita acá a propósito (spec-004 territory: cerrar/archivar un caso es una
-    transición de negocio, no un campo de formulario libre) -- se agrega cuando haga falta.
+    `status="archived"` es el soft-hide que dispara el botón de borrar del sidebar del
+    frontend: nunca hay un DELETE real sobre `AuditCase` (mismo espíritu append-only que
+    `Finding`/`Report`/`Chat`).
     """
 
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     context: str | None = None
+    status: AuditCaseStatus | None = None

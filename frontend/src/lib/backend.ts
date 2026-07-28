@@ -52,6 +52,15 @@ export async function createProject(name: string, context: string | null = null)
   return toProject(created);
 }
 
+// Soft-hide: nunca hay un DELETE real sobre AuditCase (append-only, ver app/schemas/audit_case.py).
+export async function archiveProject(id: string): Promise<Project> {
+  const updated = await apiFetch<AuditCaseApi>(`/audit-cases/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status: "archived" }),
+  });
+  return toProject(updated);
+}
+
 // ---------------------------------------------------------------------------
 // Chats y mensajes
 // ---------------------------------------------------------------------------
@@ -60,11 +69,12 @@ interface ChatApi {
   id: string;
   case_id: string | null;
   title: string | null;
+  archived: boolean;
   updated_at: string;
 }
 
 function toChatSummary(c: ChatApi): ChatSummary {
-  return { id: c.id, caseId: c.case_id, title: c.title, updatedAt: c.updated_at };
+  return { id: c.id, caseId: c.case_id, title: c.title, archived: c.archived, updatedAt: c.updated_at };
 }
 
 interface MessageApi {
@@ -120,6 +130,15 @@ export async function createChat(caseId: string | null): Promise<ChatSummary> {
 export async function getMessages(chatId: string): Promise<ChatMessage[]> {
   const messages = await apiFetch<MessageApi[]>(`/chats/${chatId}/messages`);
   return messages.map(toChatMessage);
+}
+
+// Soft-hide: nunca hay un DELETE real sobre Chat/Message (append-only, ver app/schemas/chat.py).
+export async function archiveChat(id: string): Promise<ChatSummary> {
+  const updated = await apiFetch<ChatApi>(`/chats/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ archived: true }),
+  });
+  return toChatSummary(updated);
 }
 
 export async function postMessage(chatId: string, content: string): Promise<ChatMessage[]> {

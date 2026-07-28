@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { Link, useLocation } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { getChats, getProjects, getToolCatalog } from "@/lib/backend";
+import { archiveChat, archiveProject, getChats, getProjects, getToolCatalog } from "@/lib/backend";
+import { Modal } from "@/components/Modal";
 import { NewProjectModal } from "@/components/projects/NewProjectModal";
+
+type ArchiveTarget = { kind: "project" | "chat"; id: string; name: string; path: string };
 
 // Primer corte de la Sidebar (tarea 1d/2b del plan): estructura + navegación real contra los
 // datos mock. El diseño visual (paleta, tipografía, spacing) está portado 1:1 del mockup vía
@@ -11,13 +14,32 @@ import { NewProjectModal } from "@/components/projects/NewProjectModal";
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const [showNewProject, setShowNewProject] = useState(false);
+  const [archiveTarget, setArchiveTarget] = useState<ArchiveTarget | null>(null);
   const location = useLocation();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const projectsQuery = useQuery({ queryKey: ["projects"], queryFn: getProjects });
   const toolsQuery = useQuery({ queryKey: ["tools"], queryFn: getToolCatalog });
   const standaloneChatsQuery = useQuery({
     queryKey: ["chats", { standalone: true }],
     queryFn: () => getChats({ standalone: true }),
+  });
+
+  // Soft-hide (archivar), nunca un DELETE real -- ver app/routers/audit_cases.py y
+  // app/routers/chats.py. Si el proyecto/chat archivado es el que está abierto ahora mismo,
+  // navega a "/" porque va a desaparecer de las listas que lo mantenían visible.
+  const archiveMutation = useMutation({
+    mutationFn: (target: ArchiveTarget) =>
+      target.kind === "project" ? archiveProject(target.id) : archiveChat(target.id),
+    onSuccess: (_, target) => {
+      queryClient.invalidateQueries({ queryKey: ["projects"] });
+      queryClient.invalidateQueries({ queryKey: ["chats"] });
+      if (location.pathname === target.path || location.pathname.startsWith(`${target.path}/`)) {
+        navigate("/");
+      }
+      setArchiveTarget(null);
+    },
   });
 
   return (
@@ -77,19 +99,36 @@ export function Sidebar() {
             projectsQuery.data?.map((project) => {
               const active = location.pathname.startsWith(`/projects/${project.id}`);
               return (
-                <Link
-                  key={project.id}
-                  to={`/projects/${project.id}`}
-                  className={`flex items-center gap-2 truncate rounded-sm border-l-2 px-2 py-1.5 text-[13px] ${
-                    active
-                      ? "border-accent bg-accent-tint text-text"
-                      : "border-transparent text-text-dim hover:bg-bg-sunken hover:text-text"
-                  }`}
-                  title={project.name}
-                >
-                  <FolderIcon className={active ? "text-accent" : "text-text-faint"} />
-                  <span className="truncate">{project.name}</span>
-                </Link>
+                <div key={project.id} className="group/row flex items-center">
+                  <Link
+                    to={`/projects/${project.id}`}
+                    className={`flex min-w-0 flex-1 items-center gap-2 truncate rounded-sm border-l-2 px-2 py-1.5 text-[13px] ${
+                      active
+                        ? "border-accent bg-accent-tint text-text"
+                        : "border-transparent text-text-dim hover:bg-bg-sunken hover:text-text"
+                    }`}
+                    title={project.name}
+                  >
+                    <FolderIcon className={active ? "text-accent" : "text-text-faint"} />
+                    <span className="truncate">{project.name}</span>
+                  </Link>
+                  <button
+                    className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-faint opacity-0 hover:bg-bg-sunken hover:text-flag group-hover/row:opacity-100"
+                    title="Borrar proyecto"
+                    aria-label={`Borrar proyecto ${project.name}`}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setArchiveTarget({
+                        kind: "project",
+                        id: project.id,
+                        name: project.name,
+                        path: `/projects/${project.id}`,
+                      });
+                    }}
+                  >
+                    <TrashIcon />
+                  </button>
+                </div>
               );
             })}
         </div>
@@ -122,18 +161,35 @@ export function Sidebar() {
               Recientes
             </div>
             {standaloneChatsQuery.data.map((chat) => (
-              <Link
-                key={chat.id}
-                to={`/chats/${chat.id}`}
-                className={`flex items-center gap-2 truncate rounded-sm border-l-2 px-2 py-1.5 text-[13px] ${
-                  location.pathname === `/chats/${chat.id}`
-                    ? "border-accent bg-accent-tint text-text"
-                    : "border-transparent text-text-dim hover:bg-bg-sunken hover:text-text"
-                }`}
-              >
-                <ChatIcon className="text-text-faint" />
-                <span className="truncate">{chat.title ?? "Nuevo chat"}</span>
-              </Link>
+              <div key={chat.id} className="group/row flex items-center">
+                <Link
+                  to={`/chats/${chat.id}`}
+                  className={`flex min-w-0 flex-1 items-center gap-2 truncate rounded-sm border-l-2 px-2 py-1.5 text-[13px] ${
+                    location.pathname === `/chats/${chat.id}`
+                      ? "border-accent bg-accent-tint text-text"
+                      : "border-transparent text-text-dim hover:bg-bg-sunken hover:text-text"
+                  }`}
+                >
+                  <ChatIcon className="text-text-faint" />
+                  <span className="truncate">{chat.title ?? "Nuevo chat"}</span>
+                </Link>
+                <button
+                  className="flex h-6 w-6 flex-shrink-0 items-center justify-center rounded text-text-faint opacity-0 hover:bg-bg-sunken hover:text-flag group-hover/row:opacity-100"
+                  title="Borrar conversación"
+                  aria-label={`Borrar conversación ${chat.title ?? "Nuevo chat"}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    setArchiveTarget({
+                      kind: "chat",
+                      id: chat.id,
+                      name: chat.title ?? "Nuevo chat",
+                      path: `/chats/${chat.id}`,
+                    });
+                  }}
+                >
+                  <TrashIcon />
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -152,6 +208,44 @@ export function Sidebar() {
       </div>
     </aside>
     {showNewProject && <NewProjectModal onClose={() => setShowNewProject(false)} />}
+    {archiveTarget && (
+      <Modal
+        title={archiveTarget.kind === "project" ? "Borrar proyecto" : "Borrar conversación"}
+        onClose={() => setArchiveTarget(null)}
+        footer={
+          <>
+            <button
+              className="rounded px-3.5 py-2 text-[13px] font-medium hover:bg-bg-sunken"
+              onClick={() => setArchiveTarget(null)}
+            >
+              Cancelar
+            </button>
+            <button
+              className="rounded border border-flag bg-flag px-3.5 py-2 text-[13px] font-semibold text-white disabled:opacity-40"
+              disabled={archiveMutation.isPending}
+              onClick={() => archiveMutation.mutate(archiveTarget)}
+            >
+              Borrar
+            </button>
+          </>
+        }
+      >
+        <p className="text-[13px] text-text-dim">
+          {archiveTarget.kind === "project" ? (
+            <>
+              Se va a ocultar el proyecto <strong className="text-text">{archiveTarget.name}</strong> del
+              sidebar. Los chats, hallazgos e informes del proyecto no se borran -- siguen
+              existiendo en la base de datos.
+            </>
+          ) : (
+            <>
+              Se va a ocultar la conversación <strong className="text-text">{archiveTarget.name}</strong>{" "}
+              del sidebar. Los mensajes no se borran -- siguen existiendo en la base de datos.
+            </>
+          )}
+        </p>
+      </Modal>
+    )}
     </>
   );
 }
@@ -199,6 +293,16 @@ function ChatIcon({ className = "" }: { className?: string }) {
   return (
     <svg className={`h-[17px] w-[17px] flex-shrink-0 ${className}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 11.5a8.5 8.5 0 1 1-3.8-7.1L21 3l-1 4.3a8.4 8.4 0 0 1 1 4.2Z" />
+    </svg>
+  );
+}
+function TrashIcon() {
+  return (
+    <svg className="h-[14px] w-[14px]" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 7h16" />
+      <path d="M9 7V4.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V7" />
+      <path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13" />
+      <path d="M10 11v6M14 11v6" />
     </svg>
   );
 }

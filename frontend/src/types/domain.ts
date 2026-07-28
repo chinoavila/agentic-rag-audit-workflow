@@ -57,6 +57,7 @@ export interface ChatSummary {
   id: string;
   caseId: string | null;
   title: string | null;
+  archived: boolean;
   updatedAt: string;
 }
 

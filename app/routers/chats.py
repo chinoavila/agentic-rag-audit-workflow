@@ -108,7 +108,7 @@ def list_chats(
     Sin filtro: todos los chats. `case_id=X`: solo los de ese proyecto. `standalone=true`
     (ignorado si se pasa `case_id`): solo chats sin proyecto (`case_id IS NULL`).
     """
-    query = db.query(Chat)
+    query = db.query(Chat).filter(Chat.archived.is_(False))
     if case_id is not None:
         query = query.filter(Chat.case_id == case_id)
     elif standalone:
@@ -132,9 +132,12 @@ def patch_chat(
     db: Session = Depends(get_db),
     current_user: CurrentUser = Depends(get_current_user),
 ) -> Chat:
-    """Único campo mutable de un chat: `title` (los mensajes son append-only, spec-020)."""
+    """Edita `title` y/o `archived` de un chat (los mensajes son append-only, spec-020)."""
     chat = _get_chat_or_404(db, chat_id)
-    chat.title = payload.title
+    if payload.title is not None:
+        chat.title = payload.title
+    if payload.archived is not None:
+        chat.archived = payload.archived
     db.commit()
     db.refresh(chat)
     return chat

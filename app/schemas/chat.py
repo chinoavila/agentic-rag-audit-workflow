@@ -29,16 +29,22 @@ class ChatOut(BaseModel):
     id: str
     case_id: str | None
     title: str | None
+    archived: bool
     created_at: datetime
     updated_at: datetime
 
 
 class ChatPatch(BaseModel):
-    """Único campo mutable de un chat (los mensajes son append-only)."""
+    """Campos mutables de un chat (los mensajes son append-only).
+
+    `archived` es el soft-hide que dispara el botón de borrar del sidebar del frontend: nunca
+    hay un DELETE real sobre `Chat` (ver docstring de `app/routers/chats.py`).
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    title: str = Field(..., min_length=1, max_length=255)
+    title: str | None = Field(default=None, min_length=1, max_length=255)
+    archived: bool | None = None
 
 
 class MessageOut(BaseModel):
