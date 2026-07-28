@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { createChat, getChat, getMessages, getProject, postMessage } from "@/lib/backend";
+import { ApiError } from "@/lib/api";
 import { StatusPill } from "@/components/StatusPill";
 import { useRightPanel } from "@/context/RightPanelContext";
 import type { ChatMessage } from "@/types/domain";
@@ -33,10 +34,6 @@ export function ChatRoute() {
     enabled: !!chatId,
   });
 
-  useEffect(() => {
-    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
-  }, [messagesQuery.data]);
-
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
       let id = chatId;
@@ -56,6 +53,10 @@ export function ChatRoute() {
     },
   });
 
+  useEffect(() => {
+    threadRef.current?.scrollTo({ top: threadRef.current.scrollHeight });
+  }, [messagesQuery.data, sendMutation.isPending]);
+
   const handleSend = () => {
     const content = draft.trim();
     if (!content) return;
@@ -66,6 +67,14 @@ export function ChatRoute() {
   const messages = messagesQuery.data ?? [];
   const project = projectQuery.data;
   const chat = chatQuery.data;
+  const pendingContent = sendMutation.isPending ? sendMutation.variables : undefined;
+  const errorMessage =
+    sendMutation.isError
+      ? sendMutation.error instanceof ApiError
+        ? sendMutation.error.message
+        : "No se pudo enviar el mensaje. Probá de nuevo."
+      : null;
+  const showThread = messages.length > 0 || pendingContent !== undefined;
 
   return (
     <div className="flex h-full flex-col">
@@ -81,12 +90,30 @@ export function ChatRoute() {
         <div className="text-[14.5px] font-semibold">{chat?.title ?? "Nuevo chat"}</div>
       </div>
 
-      {messages.length > 0 ? (
+      {showThread ? (
         <div ref={threadRef} className="scrollbar-thin flex-1 overflow-y-auto py-6">
           <div className="mx-auto flex w-full max-w-[720px] flex-col gap-4.5 px-6">
             {messages.map((m) => (
               <MessageBubble key={m.id} message={m} />
             ))}
+            {pendingContent !== undefined && (
+              <>
+                <MessageBubble
+                  message={{
+                    id: "pending-user",
+                    chatId: chatId ?? "",
+                    role: "user",
+                    content: pendingContent,
+                    toolName: null,
+                    toolInput: null,
+                    toolOutput: null,
+                    reportId: null,
+                    createdAt: "",
+                  }}
+                />
+                <ThinkingBubble />
+              </>
+            )}
           </div>
         </div>
       ) : (
@@ -101,6 +128,11 @@ export function ChatRoute() {
       )}
 
       <div className="flex-shrink-0 px-6 pb-5 pt-3.5">
+        {errorMessage && (
+          <div className="mx-auto mb-2.5 max-w-[720px] rounded-lg border border-flag/30 bg-flag-tint px-3.5 py-2 text-[12.8px] text-flag">
+            {errorMessage}
+          </div>
+        )}
         <div className="mx-auto flex max-w-[720px] items-end gap-2 rounded-lg border border-border bg-bg-raised p-2 pl-4 shadow-lg">
           <textarea
             rows={1}
@@ -127,6 +159,21 @@ export function ChatRoute() {
         <div className="mt-2 text-center text-[11px] text-text-faint">
           Sin streaming real todavía (ver plan spec-020) — la respuesta se revela de una vez.
         </div>
+      </div>
+    </div>
+  );
+}
+
+function ThinkingBubble() {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2 text-xs font-semibold text-text-dim">
+        <span className="h-1.5 w-1.5 rounded-full bg-verdigris" /> Asistente
+      </div>
+      <div className="flex items-center gap-1 text-[13.6px] text-text-faint">
+        <span className="animate-bounce [animation-delay:0ms]">●</span>
+        <span className="animate-bounce [animation-delay:150ms]">●</span>
+        <span className="animate-bounce [animation-delay:300ms]">●</span>
       </div>
     </div>
   );

@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from openai import APIError, RateLimitError
 from sqlalchemy.orm import Session
 
 from app.agentic_core.loop import run_agent_turn
@@ -171,7 +172,30 @@ async def post_chat_message(
     conversation_history = [_message_to_wire(m) for m in history_rows]
     history_len_before = len(conversation_history)
 
-    result = await run_agent_turn(payload.content, conversation_history, db, case_id=chat.case_id)
+    try:
+        result = await run_agent_turn(payload.content, conversation_history, db, case_id=chat.case_id)
+    except RateLimitError:
+        # Groq/OpenAI devuelve 429 cuando se agota la cuota de tokens del modelo. No es un
+        # bug del backend ni del usuario: se normaliza a 500 (spec-010 restringe los status
+        # code posibles) pero con `code` distinguible para que el frontend muestre un mensaje
+        # accionable en vez de "Internal server error".
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=api_error_detail(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "El servicio de IA alcanzó su límite de uso por ahora. Probá de nuevo en unos minutos.",
+                "llm_rate_limited",
+            ),
+        ) from None
+    except APIError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=api_error_detail(
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+                "El servicio de IA no está disponible en este momento. Probá de nuevo más tarde.",
+                "llm_unavailable",
+            ),
+        ) from None
 
     delta = result.conversation_history[history_len_before:]
     tool_idx = 0
