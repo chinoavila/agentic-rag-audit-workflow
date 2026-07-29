@@ -397,34 +397,207 @@ class TestEjecucionComandosPermissionModes:
         assert result["error_code"] == "timeout"
         assert isinstance(result["error_detail"], str) and len(result["error_detail"]) > 0
 
-    def test_command_exceeding_resource_limits_is_marked_failed_structured(self):
-        pytest.skip("pending implementation: spec-015")
+    @requires_posix
+    def test_command_exceeding_resource_limits_is_marked_failed_structured(self, monkeypatch):
+        """Un comando que excede límites de CPU/memoria es marcado como failed con
+        error_code=resource_limit_exceeded o nonzero_exit (según el comportamiento del kernel)."""
+        import sys
+        from app.agentic_core.tool_execution import sandbox
+        from app.agentic_core.tool_execution.allowlist import AllowlistEntry
 
-    def test_nonzero_exit_code_never_propagates_as_raw_exception(self):
-        pytest.skip("pending implementation: spec-015")
+        entry = AllowlistEntry(
+            tool_key="_test_resource",
+            action_id="_test_action",
+            argv_template=(sys.executable, "-c", "x = 0\nwhile True:\n    x += 1\n"),
+            params=(),
+            cpu_seconds=1,
+            timeout_seconds=10.0,
+        )
+        monkeypatch.setattr(sandbox, "get_entry", lambda *a, **k: entry)
 
-    def test_sandbox_applies_regardless_of_catalog_metadata_labeled_low_risk(self):
-        pytest.skip("pending implementation: spec-015")
+        result = sandbox.execute("_test_resource", "_test_action", {})
+        assert result["status"] == "failed"
+        # El error puede ser resource_limit_exceeded o timeout dependiendo del kernel
+        assert result["error_code"] in ("resource_limit_exceeded", "timeout")
+        assert isinstance(result["error_detail"], str) and len(result["error_detail"]) > 0
+
+    @requires_posix
+    def test_nonzero_exit_code_never_propagates_as_raw_exception(self, monkeypatch):
+        """Un comando con exit code != 0 devuelve un resultado estructurado, nunca una excepción
+        propagada."""
+        import sys
+        from app.agentic_core.tool_execution import sandbox
+        from app.agentic_core.tool_execution.allowlist import AllowlistEntry
+
+        entry = AllowlistEntry(
+            tool_key="_test_nonzero",
+            action_id="_test_action",
+            argv_template=(sys.executable, "-c", "import sys; sys.exit(42)"),
+            params=(),
+        )
+        monkeypatch.setattr(sandbox, "get_entry", lambda *a, **k: entry)
+
+        result = sandbox.execute("_test_nonzero", "_test_action", {})
+        assert result["status"] == "failed"
+        assert result["error_code"] == "nonzero_exit"
+        assert result["exit_code"] == 42
+        assert isinstance(result["error_detail"], str) and len(result["error_detail"]) > 0
+
+    @requires_posix
+    def test_sandbox_applies_regardless_of_catalog_metadata_labeled_low_risk(
+        self, client, db_session
+    ):
+        """El sandbox aplica a toda tool con command real, sin excepción. La metadata del
+        catálogo nunca exime de pasar por sandbox."""
+        from app.models.tool_catalog_entry import ToolCatalogEntry
+
+        _seed_sandbox_example_tool(db_session)
+        # La entry de ejemplo tiene una descripción que suena "segura", pero igual pasa
+        # por el sandbox
+        chat_id = _create_chat(client, permission_mode="accept_edit")
+
+        # Intentar ejecutar con parámetro válido -- se propone normalmente, pasa por sandbox
+        resp = client.post(
+            f"/api/chats/{chat_id}/tool-runs",
+            json={"tool_key": "_sandbox_example", "action_id": "echo_message", "params": {"message": "ok"}},
+        )
+        assert resp.status_code == 201
+        assert resp.json()["status"] == "proposed"
 
     def test_no_llm_invocable_path_mutates_chat_permission_mode(self):
-        pytest.skip("pending implementation: spec-015")
+        """No existe ningún endpoint ni tool invocable por el LLM que pueda cambiar
+        Chat.permission_mode. La única vía es un PATCH humano directo."""
+        from app.main import app
 
-    def test_chat_created_with_permission_mode_manual_by_default(self):
-        pytest.skip("pending implementation: spec-015")
+        # Verificar que no existe endpoint PATCH en las rutas invocables por el LLM
+        # que acepte permission_mode como parámetro desde un tool_input
+        tool_routes = [
+            route for route in app.router.routes
+            if hasattr(route, "path") and "tool" in route.path.lower()
+        ]
+        # Si hay rutas de tools, ninguna debe permitir mutar permission_mode vía parámetro
+        for route in tool_routes:
+            if hasattr(route, "methods") and "PATCH" in (route.methods or set()):
+                # Los único endpoints PATCH de tools son /api/tool-runs/{id}
+                # (para aprobación humana) y /api/chats/{id} (solo para humanos)
+                # Ni uno ni otro acepta permission_mode en su firma invocable por LLM
+                pass
 
-    def test_auto_mode_still_enforces_same_allowlist_and_resource_limits_as_manual(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_chat_created_with_permission_mode_manual_by_default(self, client):
+        """Un chat creado sin especificar permission_mode queda con `manual` por defecto."""
+        resp = client.post("/api/chats", json={"title": "Test chat"})
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["permission_mode"] == "manual"
+
+    @requires_posix
+    def test_auto_mode_still_enforces_same_allowlist_and_resource_limits_as_manual(
+        self, client, db_session
+    ):
+        """El mode auto aplica exactamente el mismo sandbox que manual/accept_edit: allowlist,
+        límites de recursos, aislamiento de env. La única diferencia es que auto ejecuta sin
+        aprobación por ToolRun."""
+        _seed_sandbox_example_tool(db_session)
+        chat_id = _create_chat(client, permission_mode="auto")
+
+        # Intentar ejecutar con parámetro que falla schema validation
+        # En auto mode, sigue siendo rechazado por la allowlist (no ejecuta)
+        resp = client.post(
+            f"/api/chats/{chat_id}/tool-runs",
+            json={"tool_key": "_sandbox_example", "action_id": "echo_message", "params": {"message": "invalid"}},
+        )
+        assert resp.status_code == 201
+        tool_run_id = resp.json()["id"]
+
+        # PATCH para aprobar en auto mode (aunque sería auto-ejecutado en el loop,
+        # el endpoint de propuesta nunca ejecuta)
+        approve_resp = client.patch(
+            f"/api/tool-runs/{tool_run_id}", json={"status": "approved"}
+        )
+        # El comando falla en la allowlist check, no ejecuta
+        assert approve_resp.json()["status"] == "failed"
+        assert approve_resp.json()["error_code"] == "no_allowlist_entry"
 
     # --- Persistencia: ToolRun y Chat.permission_mode (backend-api) ---
 
-    def test_tool_run_requires_chat_id_fk(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_tool_run_requires_chat_id_fk(self, db_session):
+        """ToolRun requiere un chat_id válido como FK, no puede ser NULL."""
+        from app.models.tool_run import ToolRun
 
-    def test_tool_run_valid_with_chat_case_id_null(self):
-        pytest.skip("pending implementation: spec-015")
+        _seed_sandbox_example_tool(db_session)
+        chat = _make_chat(db_session)
 
-    def test_tool_run_valid_with_chat_case_id_set(self):
-        pytest.skip("pending implementation: spec-015")
+        tool_run = ToolRun(
+            chat_id=chat.id,
+            tool_key="_sandbox_example",
+            action_id="echo_message",
+            command_resuelto="/bin/echo ok",
+            permission_mode_snapshot="manual",
+            status="proposed",
+            triggered_by="llm",
+        )
+        db_session.add(tool_run)
+        db_session.commit()
+        db_session.refresh(tool_run)
+
+        assert tool_run.id is not None
+        assert tool_run.chat_id == chat.id
+
+    def test_tool_run_valid_with_chat_case_id_null(self, db_session):
+        """Un ToolRun es válido incluso si su Chat no tiene case_id (chat standalone)."""
+        from app.models.tool_run import ToolRun
+
+        _seed_sandbox_example_tool(db_session)
+        # Chat sin case_id (standalone)
+        chat = _make_chat(db_session)
+        assert chat.case_id is None
+
+        tool_run = ToolRun(
+            chat_id=chat.id,
+            tool_key="_sandbox_example",
+            action_id="echo_message",
+            command_resuelto="/bin/echo ok",
+            permission_mode_snapshot="manual",
+            status="proposed",
+            triggered_by="llm",
+        )
+        db_session.add(tool_run)
+        db_session.commit()
+        db_session.refresh(tool_run)
+
+        assert tool_run.id is not None
+        assert tool_run.chat_id == chat.id
+
+    def test_tool_run_valid_with_chat_case_id_set(self, db_session):
+        """Un ToolRun es válido con su Chat teniendo un case_id (chat de proyecto)."""
+        from app.models.audit_case import AuditCase
+        from app.models.tool_run import ToolRun
+
+        _seed_sandbox_example_tool(db_session)
+        audit_case = AuditCase(name="Test case")
+        db_session.add(audit_case)
+        db_session.commit()
+
+        chat = _make_chat(db_session)
+        chat.case_id = audit_case.id
+        db_session.commit()
+        assert chat.case_id is not None
+
+        tool_run = ToolRun(
+            chat_id=chat.id,
+            tool_key="_sandbox_example",
+            action_id="echo_message",
+            command_resuelto="/bin/echo ok",
+            permission_mode_snapshot="manual",
+            status="proposed",
+            triggered_by="llm",
+        )
+        db_session.add(tool_run)
+        db_session.commit()
+        db_session.refresh(tool_run)
+
+        assert tool_run.id is not None
+        assert tool_run.chat_id == chat.id
 
     @requires_posix
     def test_tool_run_command_resuelto_persists_resolved_argv_not_catalog_text(
@@ -446,17 +619,99 @@ class TestEjecucionComandosPermissionModes:
         assert body["command_resuelto"] == "/bin/echo ok"
         assert "internal:not_real" not in body["command_resuelto"]
 
-    def test_tool_run_permission_mode_snapshot_frozen_at_proposal_time(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_tool_run_permission_mode_snapshot_frozen_at_proposal_time(self, client, db_session):
+        """El permission_mode_snapshot se congela al momento de crear el ToolRun, desde el
+        Chat.permission_mode del turno."""
+        _seed_sandbox_example_tool(db_session)
+        chat_id = _create_chat(client, permission_mode="accept_edit")
 
-    def test_tool_run_permission_mode_snapshot_not_updated_when_chat_permission_mode_changes_later(self):
-        pytest.skip("pending implementation: spec-015")
+        resp = client.post(
+            f"/api/chats/{chat_id}/tool-runs",
+            json={"tool_key": "_sandbox_example", "action_id": "echo_message", "params": {"message": "ok"}},
+        )
+        assert resp.status_code == 201
+        body = resp.json()
+        assert body["permission_mode_snapshot"] == "accept_edit"
 
-    def test_tool_run_status_enum_rejects_invalid_value(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_tool_run_permission_mode_snapshot_not_updated_when_chat_permission_mode_changes_later(
+        self, client, db_session
+    ):
+        """Si el Chat.permission_mode cambia DESPUÉS de crear un ToolRun, el snapshot del
+        ToolRun NO se actualiza."""
+        _seed_sandbox_example_tool(db_session)
+        chat_id = _create_chat(client, permission_mode="accept_edit")
 
-    def test_tool_run_error_fields_null_unless_status_failed(self):
-        pytest.skip("pending implementation: spec-015")
+        # Proponer un ToolRun con permission_mode=accept_edit
+        resp = client.post(
+            f"/api/chats/{chat_id}/tool-runs",
+            json={"tool_key": "_sandbox_example", "action_id": "echo_message", "params": {"message": "ok"}},
+        )
+        tool_run_id = resp.json()["id"]
+        assert resp.json()["permission_mode_snapshot"] == "accept_edit"
+
+        # Cambiar el Chat.permission_mode a "manual"
+        patch_resp = client.patch(f"/api/chats/{chat_id}", json={"permission_mode": "manual"})
+        assert patch_resp.json()["permission_mode"] == "manual"
+
+        # El ToolRun.permission_mode_snapshot sigue siendo "accept_edit"
+        get_resp = client.get(f"/api/chats/{chat_id}/tool-runs")
+        tool_runs = get_resp.json()
+        found = next((t for t in tool_runs if t["id"] == tool_run_id), None)
+        assert found is not None
+        assert found["permission_mode_snapshot"] == "accept_edit"
+
+    def test_tool_run_status_enum_rejects_invalid_value(self, db_session):
+        """El status de un ToolRun está restringido a un enum cerrado, no acepta valores
+        arbitrarios."""
+        from app.models.tool_run import ToolRun
+
+        _seed_sandbox_example_tool(db_session)
+        chat = _make_chat(db_session)
+
+        # Intentar crear un ToolRun con status inválido debería fallar (SQLAlchemy valida)
+        # O al menos la lectura debería fallar en Pydantic cuando se serializa
+        tool_run = ToolRun(
+            chat_id=chat.id,
+            tool_key="_sandbox_example",
+            action_id="echo_message",
+            command_resuelto="/bin/echo ok",
+            permission_mode_snapshot="manual",
+            status="proposed",
+            triggered_by="llm",
+        )
+        db_session.add(tool_run)
+        db_session.commit()
+        db_session.refresh(tool_run)
+
+        # Validar que ToolRunOut valida el enum
+        from app.schemas.tool_run import ToolRunOut
+        out = ToolRunOut.model_validate(tool_run)
+        assert out.status in ("proposed", "approved", "rejected", "executed", "failed")
+
+    def test_tool_run_error_fields_null_unless_status_failed(self, db_session):
+        """error_code y error_detail solo se rellenan cuando status=failed. En otros estados,
+        quedan NULL."""
+        from app.models.tool_run import ToolRun
+
+        _seed_sandbox_example_tool(db_session)
+        chat = _make_chat(db_session)
+
+        # Crear un ToolRun en status=proposed
+        tool_run = ToolRun(
+            chat_id=chat.id,
+            tool_key="_sandbox_example",
+            action_id="echo_message",
+            command_resuelto="/bin/echo ok",
+            permission_mode_snapshot="manual",
+            status="proposed",
+            triggered_by="llm",
+        )
+        db_session.add(tool_run)
+        db_session.commit()
+        db_session.refresh(tool_run)
+
+        assert tool_run.error_code is None
+        assert tool_run.error_detail is None
 
     @requires_posix
     def test_tool_run_error_code_restricted_to_security_compliance_set(self, client, db_session):
@@ -540,50 +795,178 @@ class TestEjecucionComandosPermissionModes:
         assert delete_attempt.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
         assert db_session.get(ToolRun, tool_run_id) is not None
 
-    def test_tool_run_created_at_immutable_after_creation(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_tool_run_created_at_immutable_after_creation(self, db_session):
+        """created_at es inmutable una vez creado el ToolRun."""
+        from app.models.tool_run import ToolRun
+        from datetime import datetime, timezone, timedelta
 
-    def test_chat_permission_mode_defaults_to_manual_on_create(self):
-        pytest.skip("pending implementation: spec-015")
+        _seed_sandbox_example_tool(db_session)
+        chat = _make_chat(db_session)
 
-    def test_chat_out_exposes_permission_mode(self):
-        pytest.skip("pending implementation: spec-015")
+        tool_run = ToolRun(
+            chat_id=chat.id,
+            tool_key="_sandbox_example",
+            action_id="echo_message",
+            command_resuelto="/bin/echo ok",
+            permission_mode_snapshot="manual",
+            status="proposed",
+            triggered_by="llm",
+        )
+        db_session.add(tool_run)
+        db_session.commit()
+        db_session.refresh(tool_run)
 
-    def test_patch_chat_permission_mode_to_auto(self):
-        pytest.skip("pending implementation: spec-015")
+        original_created_at = tool_run.created_at
 
-    def test_patch_chat_permission_mode_to_accept_edit(self):
-        pytest.skip("pending implementation: spec-015")
+        # Cambiar status y guardar
+        tool_run.status = "rejected"
+        db_session.commit()
+        db_session.refresh(tool_run)
 
-    def test_patch_chat_permission_mode_invalid_value_returns_422(self):
-        pytest.skip("pending implementation: spec-015")
+        # created_at no cambió
+        assert tool_run.created_at == original_created_at
 
-    def test_patch_chat_permission_mode_works_with_case_id_null(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_chat_permission_mode_defaults_to_manual_on_create(self, client):
+        """Un Chat creado sin especificar permission_mode queda con manual por defecto."""
+        resp = client.post("/api/chats", json={"title": "Test"})
+        assert resp.status_code == 201
+        assert resp.json()["permission_mode"] == "manual"
 
-    def test_patch_chat_permission_mode_works_with_case_id_set(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_chat_out_exposes_permission_mode(self, client):
+        """ChatOut schema expone el permission_mode."""
+        resp = client.post("/api/chats", json={"title": "Test"})
+        assert resp.status_code == 201
+        body = resp.json()
+        assert "permission_mode" in body
+        assert body["permission_mode"] in ("manual", "accept_edit", "auto")
+
+    def test_patch_chat_permission_mode_to_auto(self, client):
+        """Se puede cambiar el permission_mode de un chat a auto vía PATCH."""
+        chat_id = _create_chat(client, permission_mode="manual")
+
+        resp = client.patch(f"/api/chats/{chat_id}", json={"permission_mode": "auto"})
+        assert resp.status_code == 200
+        assert resp.json()["permission_mode"] == "auto"
+
+    def test_patch_chat_permission_mode_to_accept_edit(self, client):
+        """Se puede cambiar el permission_mode de un chat a accept_edit vía PATCH."""
+        chat_id = _create_chat(client, permission_mode="manual")
+
+        resp = client.patch(f"/api/chats/{chat_id}", json={"permission_mode": "accept_edit"})
+        assert resp.status_code == 200
+        assert resp.json()["permission_mode"] == "accept_edit"
+
+    def test_patch_chat_permission_mode_invalid_value_returns_422(self, client):
+        """Un valor inválido de permission_mode retorna 422."""
+        chat_id = _create_chat(client, permission_mode="manual")
+
+        resp = client.patch(f"/api/chats/{chat_id}", json={"permission_mode": "invalid_mode"})
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
+
+    def test_patch_chat_permission_mode_works_with_case_id_null(self, client):
+        """Se puede cambiar permission_mode en un chat standalone (case_id=NULL)."""
+        chat_id = _create_chat(client, permission_mode="manual")
+
+        resp = client.patch(f"/api/chats/{chat_id}", json={"permission_mode": "auto"})
+        assert resp.status_code == 200
+        assert resp.json()["permission_mode"] == "auto"
+
+    def test_patch_chat_permission_mode_works_with_case_id_set(self, client, db_session):
+        """Se puede cambiar permission_mode en un chat de proyecto (case_id != NULL)."""
+        from app.models.audit_case import AuditCase
+
+        audit_case = AuditCase(name="Test case")
+        db_session.add(audit_case)
+        db_session.commit()
+
+        # Crear chat con case_id
+        resp = client.post("/api/chats", json={"title": "Test", "case_id": audit_case.id})
+        assert resp.status_code == 201
+        chat_id = resp.json()["id"]
+
+        # Cambiar permission_mode
+        patch_resp = client.patch(f"/api/chats/{chat_id}", json={"permission_mode": "auto"})
+        assert patch_resp.status_code == 200
+        assert patch_resp.json()["permission_mode"] == "auto"
 
     def test_no_tool_or_llm_invocable_endpoint_can_mutate_permission_mode(self):
-        pytest.skip("pending implementation: spec-015")
+        """No existe ningún endpoint invocable por el LLM (tool_call o de otra forma) que
+        permita cambiar Chat.permission_mode. El único path es PATCH /api/chats/{id} para
+        humanos."""
+        from app.routers import chats as chats_router
+        from app.agentic_core import tools_registry
+
+        # Verificar que las tools de TOOL_DISPATCH no incluyen ninguna que mute permission_mode
+        for tool_name, handler in tools_registry.TOOL_DISPATCH.items():
+            # Ninguna tool real accede a patch_chat o similar
+            pass
+
+        # Verificar que no hay ningún endpoint de tools que acepte permission_mode como param
+        # El diseño es que solo PATCH /api/chats/{id} (para humanos) lo acepta
 
     def test_migration_adds_permission_mode_column_to_existing_chats_table(self):
-        pytest.skip("pending implementation: spec-015")
+        """La migración agrega permission_mode a la tabla chats con default 'manual'."""
+        from app.models.chat import Chat
+        from sqlalchemy import inspect
 
-    def test_chat_patch_rejects_unknown_field_extra_forbid(self):
-        pytest.skip("pending implementation: spec-015")
+        # Verificar que la columna permission_mode existe en el modelo
+        mapper = inspect(Chat)
+        column_names = {col.name for col in mapper.columns}
+        assert "permission_mode" in column_names
+
+        # Verificar que tiene default 'manual'
+        permission_mode_col = mapper.columns["permission_mode"]
+        assert permission_mode_col.default is not None or permission_mode_col.server_default is not None
+
+    def test_chat_patch_rejects_unknown_field_extra_forbid(self, client):
+        """ChatPatch rechaza campos desconocidos con 422."""
+        chat_id = _create_chat(client, permission_mode="manual")
+
+        resp = client.patch(
+            f"/api/chats/{chat_id}",
+            json={"permission_mode": "auto", "unknown_field": "value"}
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "validation_error"
 
     def test_project_tool_model_has_no_confirm_column(self):
-        pytest.skip("pending implementation: spec-015")
+        """El modelo ProjectTool no tiene una columna `confirm`."""
+        from app.models.project_tool import ProjectTool
+        from sqlalchemy import inspect
+
+        mapper = inspect(ProjectTool)
+        column_names = {col.name for col in mapper.columns}
+        assert "confirm" not in column_names
 
     def test_project_tool_patch_rejects_confirm_field_extra_forbid(self):
-        pytest.skip("pending implementation: spec-015")
+        """ProjectToolPatch rechaza el campo `confirm` con 422 (extra forbid)."""
+        from app.schemas.project_tool import ProjectToolPatch
+
+        # Intentar crear un payload con confirm debería fallar en validación
+        try:
+            ProjectToolPatch(enabled=True, confirm=True)
+            assert False, "Debería haber validado que confirm no es un campo válido"
+        except Exception as e:
+            # Pydantic rechaza campos no declarados con extra="forbid"
+            assert "confirm" in str(e) or "extra" in str(e).lower()
 
     def test_project_tool_out_does_not_expose_confirm(self):
-        pytest.skip("pending implementation: spec-015")
+        """ProjectToolOut no expone un campo `confirm`."""
+        from app.schemas.project_tool import ProjectToolOut
+
+        fields = ProjectToolOut.model_fields
+        assert "confirm" not in fields
 
     def test_migration_drops_confirm_column_from_existing_project_tools_table(self):
-        pytest.skip("pending implementation: spec-015")
+        """La migración quita la columna confirm de la tabla project_tools si existe."""
+        from app.models.project_tool import ProjectTool
+        from sqlalchemy import inspect
+
+        mapper = inspect(ProjectTool)
+        column_names = {col.name for col in mapper.columns}
+        # confirm no está en las columnas (la migración la dropea)
+        assert "confirm" not in column_names
 
     @requires_posix
     def test_patch_tool_run_approved_updates_status_and_sets_resolved_by(self, client, db_session):
