@@ -5,14 +5,15 @@
 import { apiFetch } from "@/lib/api";
 import type {
   CaseFile,
+  CaseTool,
   ChatMessage,
   ChatSummary,
   Project,
+  ProjectTool,
   Report,
   ToolAction,
   ToolCatalogEntry,
   ToolCatalogEntryDraft,
-  ToolInstance,
 } from "@/types/domain";
 
 // ---------------------------------------------------------------------------
@@ -181,31 +182,70 @@ export async function updateTool(key: string, patch: Omit<ToolCatalogEntryDraft,
 }
 
 // ---------------------------------------------------------------------------
-// Herramientas activas por proyecto
+// Herramientas de un proyecto (spec-013, Task 16/19)
+//
+// `GET .../tools` deja de devolver solo las filas `ProjectTool` agregadas explícitamente --
+// devuelve la vista fusionada default-on de TODAS las `ToolCatalogEntry.installed=true`, cada
+// una con su override opcional. La ausencia de `project_tool` YA NO significa "no disponible".
+// `POST .../tools` pasó de "agregar tool al proyecto" a "crear/editar el override puntual de
+// inclusión/exclusión" -- se mantiene el verbo/ruta HTTP.
 // ---------------------------------------------------------------------------
 
 interface ProjectToolApi {
+  id: string;
+  case_id: string;
   tool_key: string;
   enabled: boolean;
-  confirm: boolean;
   allowed_action_ids: string[];
+  created_at: string;
 }
 
-function toToolInstance(pt: ProjectToolApi): ToolInstance {
-  return { key: pt.tool_key, enabled: pt.enabled, confirm: pt.confirm, allowedActionIds: pt.allowed_action_ids };
+interface CaseToolApi {
+  tool_key: string;
+  label: string;
+  description: string;
+  eligible: boolean;
+  project_tool: ProjectToolApi | null;
 }
 
-export async function getProjectTools(caseId: string): Promise<ToolInstance[]> {
-  const rows = await apiFetch<ProjectToolApi[]>(`/audit-cases/${caseId}/tools`);
-  return rows.map(toToolInstance);
+function toProjectTool(pt: ProjectToolApi): ProjectTool {
+  return {
+    id: pt.id,
+    caseId: pt.case_id,
+    toolKey: pt.tool_key,
+    enabled: pt.enabled,
+    allowedActionIds: pt.allowed_action_ids,
+    createdAt: pt.created_at,
+  };
 }
 
-export async function addProjectTool(caseId: string, key: string): Promise<ToolInstance[]> {
+function toCaseTool(entry: CaseToolApi): CaseTool {
+  return {
+    toolKey: entry.tool_key,
+    label: entry.label,
+    description: entry.description,
+    eligible: entry.eligible,
+    projectTool: entry.project_tool ? toProjectTool(entry.project_tool) : null,
+  };
+}
+
+export async function getProjectTools(caseId: string): Promise<CaseTool[]> {
+  const rows = await apiFetch<CaseToolApi[]>(`/audit-cases/${caseId}/tools`);
+  return rows.map(toCaseTool);
+}
+
+// Crea/reutiliza el override `ProjectTool` para `key` (default `enabled=true` al crearse, ver
+// `app/routers/project_tools.py::add_project_tool`). Ya NO significa "agregar la tool al
+// proyecto" -- una tool instalada globalmente ya es elegible sin esta llamada; úsese
+// `setToolEligibility`/`setProjectToolAllowedActions` para las operaciones de UI reales.
+export async function addProjectTool(caseId: string, key: string): Promise<CaseTool[]> {
   await apiFetch(`/audit-cases/${caseId}/tools`, { method: "POST", body: JSON.stringify({ tool_key: key }) });
   return getProjectTools(caseId);
 }
 
-export async function removeProjectTool(caseId: string, key: string): Promise<ToolInstance[]> {
+// Elimina el override puntual (si existe) -- la tool vuelve a su elegibilidad por default del
+// catálogo global (`installed=true` => elegible), nunca queda "no disponible" por este llamado.
+export async function removeProjectTool(caseId: string, key: string): Promise<CaseTool[]> {
   await apiFetch(`/audit-cases/${caseId}/tools/${key}`, { method: "DELETE" });
   return getProjectTools(caseId);
 }
@@ -213,14 +253,39 @@ export async function removeProjectTool(caseId: string, key: string): Promise<To
 export async function updateProjectTool(
   caseId: string,
   key: string,
-  patch: Partial<Pick<ToolInstance, "enabled" | "confirm" | "allowedActionIds">>,
-): Promise<ToolInstance[]> {
+  patch: Partial<Pick<ProjectTool, "enabled" | "allowedActionIds">>,
+): Promise<CaseTool[]> {
   const body: Record<string, unknown> = {};
   if (patch.enabled !== undefined) body.enabled = patch.enabled;
-  if (patch.confirm !== undefined) body.confirm = patch.confirm;
   if (patch.allowedActionIds !== undefined) body.allowed_action_ids = patch.allowedActionIds;
   await apiFetch(`/audit-cases/${caseId}/tools/${key}`, { method: "PATCH", body: JSON.stringify(body) });
   return getProjectTools(caseId);
+}
+
+// Toggle de inclusión/exclusión que la UI puede llamar sin preocuparse si ya existe un
+// override: si `tool.projectTool` no existe y se pide `enabled=true`, no hace nada (ya es
+// elegible por default); si se pide `enabled=false` sin fila previa, primero la crea (POST) y
+// recién ahí aplica el override real (PATCH `enabled=false`) -- `POST .../tools` no acepta
+// `enabled` en el payload de creación (`ProjectToolCreate` solo tiene `tool_key`).
+export async function setToolEligibility(caseId: string, tool: CaseTool, enabled: boolean): Promise<CaseTool[]> {
+  if (!tool.projectTool) {
+    if (enabled) return getProjectTools(caseId);
+    await addProjectTool(caseId, tool.toolKey);
+  }
+  return updateProjectTool(caseId, tool.toolKey, { enabled });
+}
+
+// Análogo a `setToolEligibility` pero para `allowedActionIds`: crea el override si todavía no
+// existe (con `enabled=true` por default) antes de aplicar la restricción de acciones.
+export async function setProjectToolAllowedActions(
+  caseId: string,
+  tool: CaseTool,
+  allowedActionIds: string[],
+): Promise<CaseTool[]> {
+  if (!tool.projectTool) {
+    await addProjectTool(caseId, tool.toolKey);
+  }
+  return updateProjectTool(caseId, tool.toolKey, { allowedActionIds });
 }
 
 // ---------------------------------------------------------------------------

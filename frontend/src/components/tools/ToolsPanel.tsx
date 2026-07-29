@@ -1,153 +1,158 @@
 import { useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { addProjectTool, getProjectTools, getToolCatalog, removeProjectTool, updateProjectTool } from "@/lib/backend";
+import {
+  getProjectTools,
+  getToolCatalog,
+  removeProjectTool,
+  setProjectToolAllowedActions,
+  setToolEligibility,
+} from "@/lib/backend";
 import { Switch } from "@/components/Switch";
-import type { ToolCatalogEntry, ToolInstance } from "@/types/domain";
+import type { CaseTool } from "@/types/domain";
 
-// Panel n8n-style (ver mockup): catálogo instalado a la izquierda (lo que no está agregado
-// todavía a ESTE proyecto), herramientas activas a la derecha, cada una expandible para
-// habilitar/deshabilitar, exigir confirmación, y restringir qué acciones puede ejecutar --
-// mismo modelo que `ToolInstance.allowedActionIds` (src/types/domain.ts).
+// Panel de herramientas del proyecto (spec-013, Task 16/19; ver mockup). El backend devuelve
+// TODAS las `ToolCatalogEntry.installed=true` del catálogo global -- default-on -- así que ya
+// no hay dos columnas "catálogo disponible" / "activas en el proyecto": una única lista con
+// el estado `eligible` de cada tool. La ausencia de override (`projectTool === null`) significa
+// "elegible por default, sin personalización", NUNCA "no disponible". El control de "agregar"
+// pasa a ser un toggle de inclusión/exclusión.
 export function ToolsPanel({ caseId }: { caseId: string }) {
   const queryClient = useQueryClient();
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
+  // Se sigue consultando el catálogo global solo para resolver `label`/`command` de las
+  // acciones de cada tool -- `GET .../audit-cases/{id}/tools` no las incluye (ver
+  // `CaseToolOut` en `app/schemas/project_tool.py`).
   const catalogQuery = useQuery({ queryKey: ["tools"], queryFn: getToolCatalog });
-  const instancesQuery = useQuery({
+  const toolsQuery = useQuery({
     queryKey: ["project-tools", caseId],
     queryFn: () => getProjectTools(caseId),
   });
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["project-tools", caseId] });
 
-  const addMutation = useMutation({
-    mutationFn: (key: string) => addProjectTool(caseId, key),
+  const eligibilityMutation = useMutation({
+    mutationFn: ({ tool, enabled }: { tool: CaseTool; enabled: boolean }) =>
+      setToolEligibility(caseId, tool, enabled),
     onSuccess: invalidate,
   });
-  const removeMutation = useMutation({
+  const resetMutation = useMutation({
     mutationFn: (key: string) => removeProjectTool(caseId, key),
     onSuccess: invalidate,
   });
-  const patchMutation = useMutation({
-    mutationFn: ({ key, patch }: { key: string; patch: Partial<ToolInstance> }) =>
-      updateProjectTool(caseId, key, patch),
+  const actionsMutation = useMutation({
+    mutationFn: ({ tool, allowedActionIds }: { tool: CaseTool; allowedActionIds: string[] }) =>
+      setProjectToolAllowedActions(caseId, tool, allowedActionIds),
     onSuccess: invalidate,
   });
 
+  const tools = toolsQuery.data ?? [];
   const catalog = catalogQuery.data ?? [];
-  const instances = instancesQuery.data ?? [];
-  const activeKeys = new Set(instances.map((ti) => ti.key));
-  const available = catalog.filter((t) => t.installed && !activeKeys.has(t.key));
-  const byKey = (key: string): ToolCatalogEntry | undefined => catalog.find((t) => t.key === key);
+  const actionsFor = (toolKey: string) => catalog.find((t) => t.key === toolKey)?.actions ?? [];
 
-  const toggleAction = (ti: ToolInstance, actionId: string) => {
-    const set = new Set(ti.allowedActionIds);
-    if (set.has(actionId)) set.delete(actionId);
-    else set.add(actionId);
-    patchMutation.mutate({ key: ti.key, patch: { allowedActionIds: Array.from(set) } });
+  const toggleAction = (tool: CaseTool, actionId: string) => {
+    const allActionIds = actionsFor(tool.toolKey).map((a) => a.id);
+    const current = new Set(tool.projectTool?.allowedActionIds ?? allActionIds);
+    if (current.has(actionId)) current.delete(actionId);
+    else current.add(actionId);
+    actionsMutation.mutate({ tool, allowedActionIds: Array.from(current) });
   };
 
   return (
-    <div className="grid gap-5.5 lg:grid-cols-[1.1fr_1fr]">
-      <div>
-        <div className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-text-faint">
-          Catálogo instalado
-        </div>
-        {available.length === 0 ? (
-          <EmptyNote text="Ya agregaste todas las herramientas instaladas. Instalá más desde el catálogo global." />
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            {available.map((tool) => {
-              return (
-                <div key={tool.key} className="rounded border border-border bg-bg-raised p-3.5">
-                  <div className="text-[13px] font-semibold">{tool.label}</div>
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-text-faint">{tool.description}</p>
-                  <div className="mt-2 flex items-center justify-end">
-                    <button
-                      className="rounded border border-border px-2.5 py-1 text-xs font-semibold hover:border-accent"
-                      onClick={() => addMutation.mutate(tool.key)}
-                    >
-                      + Agregar
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+    <div>
+      <div className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-text-faint">
+        Herramientas instaladas globalmente
       </div>
-
-      <div>
-        <div className="mb-2.5 text-xs font-semibold uppercase tracking-wide text-text-faint">
-          Herramientas activas en este proyecto
-        </div>
-        {instances.length === 0 ? (
-          <EmptyNote text='Arrastrá ninguna todavía -- usá "+ Agregar" del catálogo a la izquierda.' />
-        ) : (
-          <div className="flex flex-col gap-2.5">
-            {instances.map((ti) => {
-              const def = byKey(ti.key);
-              if (!def) return null;
-              const expanded = expandedKey === ti.key;
-              return (
-                <div key={ti.key} className="rounded border border-border bg-bg-raised p-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[12.8px] font-semibold">{def.label}</span>
-                    <div className="ml-auto flex gap-1">
+      {tools.length === 0 ? (
+        <EmptyNote text="No hay herramientas instaladas en el catálogo global todavía. Instalá alguna desde el catálogo de herramientas." />
+      ) : (
+        <div className="flex flex-col gap-2.5">
+          {tools.map((tool) => {
+            const expanded = expandedKey === tool.toolKey;
+            const hasOverride = tool.projectTool !== null;
+            const actions = actionsFor(tool.toolKey);
+            const allowedActionIds = tool.projectTool?.allowedActionIds ?? actions.map((a) => a.id);
+            return (
+              <div key={tool.toolKey} className="rounded border border-border bg-bg-raised p-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[12.8px] font-semibold">{tool.label}</span>
+                      <span
+                        className={`rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide ${
+                          hasOverride ? "bg-accent-tint-strong text-accent" : "text-text-faint"
+                        }`}
+                        title={
+                          hasOverride
+                            ? "Tiene un override puntual para este proyecto"
+                            : "Elegible por default del catálogo global, sin override"
+                        }
+                      >
+                        {hasOverride ? "override" : "default"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-text-faint">{tool.description}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button
+                      className="flex h-7 w-7 items-center justify-center rounded text-text-dim hover:bg-bg-sunken"
+                      title="Configurar acciones permitidas"
+                      onClick={() => setExpandedKey(expanded ? null : tool.toolKey)}
+                    >
+                      ⚙
+                    </button>
+                    {hasOverride && (
                       <button
                         className="flex h-7 w-7 items-center justify-center rounded text-text-dim hover:bg-bg-sunken"
-                        title="Configurar"
-                        onClick={() => setExpandedKey(expanded ? null : ti.key)}
+                        title="Quitar override -- vuelve al default del catálogo global"
+                        onClick={() => resetMutation.mutate(tool.toolKey)}
                       >
-                        ⚙
+                        ↺
                       </button>
-                      <button
-                        className="flex h-7 w-7 items-center justify-center rounded text-text-dim hover:bg-bg-sunken hover:text-flag"
-                        title="Quitar"
-                        onClick={() => removeMutation.mutate(ti.key)}
-                      >
-                        🗑
-                      </button>
-                    </div>
+                    )}
+                    <Switch
+                      on={tool.eligible}
+                      onClick={() => eligibilityMutation.mutate({ tool, enabled: !tool.eligible })}
+                    />
                   </div>
-
-                  {expanded && (
-                    <div className="mt-2.5 flex flex-col gap-2.5 border-t border-border pt-2.5">
-                      <FieldRow label="Habilitada en este proyecto">
-                        <Switch on={ti.enabled} onClick={() => patchMutation.mutate({ key: ti.key, patch: { enabled: !ti.enabled } })} />
-                      </FieldRow>
-                      <FieldRow label="Confirmar antes de ejecutar">
-                        <Switch on={ti.confirm} onClick={() => patchMutation.mutate({ key: ti.key, patch: { confirm: !ti.confirm } })} />
-                      </FieldRow>
-                      {def.actions.length > 0 && (
-                        <>
-                          <div className="mt-1 text-[10.5px] font-bold uppercase tracking-wide text-text-faint">
-                            Acciones permitidas
-                          </div>
-                          {def.actions.map((action) => (
-                            <div key={action.id} className="flex flex-col gap-1">
-                              <FieldRow label={action.label}>
-                                <Switch
-                                  on={ti.allowedActionIds.includes(action.id)}
-                                  onClick={() => toggleAction(ti, action.id)}
-                                />
-                              </FieldRow>
-                              <div className="self-start rounded bg-bg-sunken px-1.5 py-0.5 font-mono text-[10.5px] text-text-faint">
-                                {action.command}
-                              </div>
-                            </div>
-                          ))}
-                        </>
-                      )}
-                    </div>
-                  )}
                 </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+
+                {expanded && (
+                  <div className="mt-2.5 flex flex-col gap-2.5 border-t border-border pt-2.5">
+                    <FieldRow label="Habilitada en este proyecto">
+                      <Switch
+                        on={tool.eligible}
+                        onClick={() => eligibilityMutation.mutate({ tool, enabled: !tool.eligible })}
+                      />
+                    </FieldRow>
+                    {actions.length > 0 && (
+                      <>
+                        <div className="mt-1 text-[10.5px] font-bold uppercase tracking-wide text-text-faint">
+                          Acciones permitidas
+                        </div>
+                        {actions.map((action) => (
+                          <div key={action.id} className="flex flex-col gap-1">
+                            <FieldRow label={action.label}>
+                              <Switch
+                                on={allowedActionIds.includes(action.id)}
+                                onClick={() => toggleAction(tool, action.id)}
+                              />
+                            </FieldRow>
+                            <div className="self-start rounded bg-bg-sunken px-1.5 py-0.5 font-mono text-[10.5px] text-text-faint">
+                              {action.command}
+                            </div>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
