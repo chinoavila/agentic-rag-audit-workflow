@@ -334,16 +334,68 @@ class TestEjecucionComandosPermissionModes:
         assert result["error_code"] == "no_allowlist_entry"
 
     def test_command_parameter_failing_schema_validation_is_rejected(self):
-        pytest.skip("pending implementation: spec-015")
+        """Parámetros que no validan contra el schema de la allowlist causan que nunca se
+        ejecute el comando (devuelve error_code=no_allowlist_entry)."""
+        from app.agentic_core.tool_execution import sandbox
 
-    def test_executed_subprocess_cannot_read_groq_api_key_or_database_url(self):
-        pytest.skip("pending implementation: spec-015")
+        # _sandbox_example solo acepta message en {ok, ping, pong}
+        result = sandbox.execute(
+            "_sandbox_example", "echo_message", {"message": "invalid_value"}
+        )
+        assert result["status"] == "failed"
+        assert result["error_code"] == "no_allowlist_entry"
 
-    def test_executed_subprocess_has_no_default_network_egress(self):
-        pytest.skip("pending implementation: spec-015")
+    @requires_posix
+    def test_executed_subprocess_cannot_read_groq_api_key_or_database_url(self, monkeypatch):
+        """El subproceso ejecutado nunca hereda las variables de entorno del backend, incluso
+        si están seteadas cuando se invoca execute()."""
+        from app.agentic_core.tool_execution import sandbox
 
-    def test_command_exceeding_timeout_is_killed_and_marked_failed_structured(self):
-        pytest.skip("pending implementation: spec-015")
+        monkeypatch.setenv("GROQ_API_KEY", "secret_key_should_not_leak")
+        monkeypatch.setenv("AUDIT_DATABASE_URL", "sqlite:////should/not/leak.db")
+
+        result = sandbox.execute("_sandbox_example", "echo_message", {"message": "ok"})
+        assert result["status"] == "executed"
+        stdout = result["stdout"] or ""
+        assert "secret_key_should_not_leak" not in stdout
+        assert "should/not/leak.db" not in stdout
+
+    @requires_posix
+    def test_executed_subprocess_has_no_default_network_egress(self, monkeypatch):
+        """El subproceso no hereda variables de proxy o credenciales de red del backend."""
+        from app.agentic_core.tool_execution import sandbox
+
+        monkeypatch.setenv("HTTP_PROXY", "http://backend-proxy-should-not-leak")
+        monkeypatch.setenv("HTTPS_PROXY", "https://backend-proxy-should-not-leak")
+        monkeypatch.setenv("GROQ_API_KEY", "should-not-leak-either")
+
+        result = sandbox.execute("_sandbox_example", "echo_message", {"message": "ok"})
+        assert result["status"] == "executed"
+        stdout = result["stdout"] or ""
+        assert "backend-proxy-should-not-leak" not in stdout
+        assert "should-not-leak-either" not in stdout
+
+    @requires_posix
+    def test_command_exceeding_timeout_is_killed_and_marked_failed_structured(self, monkeypatch):
+        """Un comando que excede el timeout es matado (SIGKILL) y marcado como failed con
+        error_code=timeout."""
+        import sys
+        from app.agentic_core.tool_execution import sandbox
+        from app.agentic_core.tool_execution.allowlist import AllowlistEntry, ParamSpec
+
+        entry = AllowlistEntry(
+            tool_key="_test_timeout",
+            action_id="_test_action",
+            argv_template=(sys.executable, "-c", "import time; time.sleep(30)"),
+            params=(),
+            timeout_seconds=1.0,
+        )
+        monkeypatch.setattr(sandbox, "get_entry", lambda *a, **k: entry)
+
+        result = sandbox.execute("_test_timeout", "_test_action", {})
+        assert result["status"] == "failed"
+        assert result["error_code"] == "timeout"
+        assert isinstance(result["error_detail"], str) and len(result["error_detail"]) > 0
 
     def test_command_exceeding_resource_limits_is_marked_failed_structured(self):
         pytest.skip("pending implementation: spec-015")
