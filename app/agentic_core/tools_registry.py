@@ -151,6 +151,13 @@ def _to_openai_tool(spec: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Alias público (spec-013/spec-015, Task 12): `app/agentic_core/loop.py` reusa este MISMO
+# adapter para las tools dinámicas que devuelve `app.rag.tool_docs.retrieve_relevant_tools`
+# (mismo shape interno `{"name","description","input_schema"}`) -- nunca reimplementa la
+# conversión al formato wire por separado.
+to_wire_tool_spec = _to_openai_tool
+
+
 # Tools listadas en un solo `tools=[...]`, ya en formato wire, listas para pasar tal cual al
 # parámetro `tools=` del cliente `openai`/Groq (ver `app/agentic_core/loop.py`).
 AGENT_TOOL_SPECS: list[dict[str, Any]] = [
@@ -204,4 +211,5 @@ __all__ = [
     "AGENT_TOOL_SPECS",
     "TOOL_DISPATCH",
     "search_evidence",
+    "to_wire_tool_spec",
 ]

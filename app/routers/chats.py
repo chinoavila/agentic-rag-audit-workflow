@@ -178,7 +178,9 @@ async def post_chat_message(
     history_len_before = len(conversation_history)
 
     try:
-        result = await run_agent_turn(payload.content, conversation_history, db, case_id=chat.case_id)
+        result = await run_agent_turn(
+            payload.content, conversation_history, db, chat_id=chat.id, case_id=chat.case_id
+        )
     except RateLimitError:
         # Groq/OpenAI devuelve 429 cuando se agota la cuota de tokens del modelo. No es un
         # bug del backend ni del usuario: se normaliza a 500 (spec-010 restringe los status

@@ -134,6 +134,13 @@ def execute_tool_run(db: Session, tool_run: ToolRun) -> ToolRun:
         # timeout/no_allowlist_entry no tienen exit_code real (spec-015, Bloque 1).
         tool_run.exit_code = result.get("exit_code")
 
+    # Task 12 (agentic-core): persiste la salida real -- ya truncada/sanitizada por
+    # `sandbox._truncate` -- para que el loop pueda devolverla al LLM (envuelta en
+    # `<untrusted_context>`) y la UI pueda mostrarla en estados terminales. `None` si el
+    # sandbox nunca llegó a correr un proceso real (p. ej. `no_allowlist_entry`).
+    tool_run.stdout = result.get("stdout")
+    tool_run.stderr = result.get("stderr")
+
     db.commit()
     db.refresh(tool_run)
     return tool_run

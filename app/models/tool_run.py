@@ -27,6 +27,15 @@ originales (`dict[str, str]`, mismo shape que `AllowlistEntry.resolve_argv`) ser
 JSON. `command_resuelto` sigue siendo el campo que se muestra a humanos (nunca se usa para
 construir el `argv` real); `params_json` es lo único que efectivamente re-alimenta al sandbox
 en `app/services/tool_run_execution.py::execute_tool_run`.
+
+Actualización (Task 12, spec-015, `agentic-core`): se agregan `stdout`/`stderr`. Motivo: el loop
+del agente (`app/agentic_core/loop.py`) necesita devolver la salida real de una ejecución
+`status=executed` al LLM (envuelta en `<untrusted_context>`, spec-005) y la UI necesita
+mostrarla ("Estados terminales: executed (badge éxito + salida)", spec-015 sección UI) -- el
+slice de Task 8/10 nunca persistía `SandboxResult.stdout`/`.stderr` (se descartaban en
+`execute_tool_run`), un gap real que esta actualización cierra sin tocar la firma estable de
+`execute_tool_run`/`create_and_execute_tool_run` (siguen devolviendo `ToolRun`). Ya vienen
+truncados/sanitizados por `sandbox.py` (spec-015 punto 3) -- este módulo no los trunca de nuevo.
 """
 
 import uuid
@@ -98,6 +107,13 @@ class ToolRun(Base):
     # Solo poblado cuando error_code="nonzero_exit" o status="executed" con exit code 0
     # disponible.
     exit_code: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Salida real del proceso ejecutado (Task 12) -- ya truncada/sanitizada por
+    # `app/agentic_core/tool_execution/sandbox.py::_truncate` (spec-015 punto 3). `None` para
+    # status in (proposed, approved, rejected) o para errores que nunca llegaron a correr un
+    # proceso real (`no_allowlist_entry`, `timeout` sin captura parcial).
+    stdout: Mapped[str | None] = mapped_column(String, nullable=True)
+    stderr: Mapped[str | None] = mapped_column(String, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, nullable=False

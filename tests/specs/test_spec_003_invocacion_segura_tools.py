@@ -17,6 +17,7 @@ import pytest
 import app.tools.create_finding  # noqa: F401 - aseguran que el módulo esté en sys.modules
 from app.agentic_core import loop as loop_module
 from app.models.audit_case import AuditCase
+from app.models.chat import Chat
 from app.models.finding import Finding
 from app.tools.create_finding import create_finding
 
@@ -130,7 +131,18 @@ class TestInvocacionSeguraTools:
 
         monkeypatch.setattr(loop_module, "get_client", lambda: _FakeAsyncClient())
 
-        result = await loop_module.run_agent_turn("buscá algo indefinidamente", [], db_session)
+        # spec-015 (agentic-core, Task 12): `run_agent_turn` ahora requiere `chat_id` -- un
+        # `Chat` real es necesario para resolver `permission_mode` en la rama de tools con
+        # `command` real, aunque este test no la ejercite (`tool_que_no_existe` no es una tool
+        # elegible/dinámica de este turno, cae en el mismo camino `unknown_tool` de siempre).
+        chat = Chat()
+        db_session.add(chat)
+        db_session.commit()
+        db_session.refresh(chat)
+
+        result = await loop_module.run_agent_turn(
+            "buscá algo indefinidamente", [], db_session, chat_id=chat.id
+        )
 
         assert result.hit_max_iterations is True
         assert call_counter["n"] == loop_module.MAX_TOOL_ITERATIONS

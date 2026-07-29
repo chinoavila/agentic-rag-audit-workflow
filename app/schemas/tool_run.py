@@ -41,6 +41,8 @@ class ToolRunOut(BaseModel):
     error_code: ToolRunErrorCode | None
     error_detail: str | None
     exit_code: int | None
+    stdout: str | None
+    stderr: str | None
     created_at: datetime
     updated_at: datetime
 

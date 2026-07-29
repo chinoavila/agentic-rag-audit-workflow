@@ -89,6 +89,7 @@ def _create_tables_if_missing() -> None:
     _migrate_add_archived_if_missing()
     _migrate_add_permission_mode_if_missing()
     _migrate_add_tool_run_params_json_if_missing()
+    _migrate_add_tool_run_stdout_stderr_if_missing()
     _migrate_drop_tool_catalog_kind_if_present()
     _migrate_drop_project_tool_confirm_if_present()
     _seed_tool_catalog_if_missing()
@@ -189,6 +190,25 @@ def _migrate_add_tool_run_params_json_if_missing() -> None:
         return
     with engine.connect() as conn:
         conn.execute(text("ALTER TABLE tool_runs ADD COLUMN params_json TEXT"))
+        conn.commit()
+
+
+def _migrate_add_tool_run_stdout_stderr_if_missing() -> None:
+    """Migración puntual: agrega `tool_runs.stdout`/`tool_runs.stderr` (spec-015, Task 12 --
+    ver docstring de `app/models/tool_run.py`) si la tabla ya existía de una sesión anterior a
+    este agregado (p. ej. un contenedor que corrió con el esquema de Task 8/10, antes de que
+    Task 12 agregara estas columnas). Mismo patrón exacto que
+    `_migrate_add_tool_run_params_json_if_missing` -- ver ese docstring.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table("tool_runs"):
+        return
+    existing_columns = {col["name"] for col in inspector.get_columns("tool_runs")}
+    with engine.connect() as conn:
+        if "stdout" not in existing_columns:
+            conn.execute(text("ALTER TABLE tool_runs ADD COLUMN stdout TEXT"))
+        if "stderr" not in existing_columns:
+            conn.execute(text("ALTER TABLE tool_runs ADD COLUMN stderr TEXT"))
         conn.commit()
 
 
