@@ -313,10 +313,25 @@ class TestEjecucionComandosPermissionModes:
     # --- Sandboxing y Autorización (security-compliance) ---
 
     def test_command_execution_never_uses_shell_true_or_string_interpolation(self):
-        pytest.skip("pending implementation: spec-015")
+        """Verificación estática que el módulo de sandbox nunca invoca subprocess peligrosamente."""
+        import inspect
+        from app.agentic_core.tool_execution import sandbox
+
+        source = inspect.getsource(sandbox)
+        # Verificar ausencia de construcciones peligrosas
+        forbidden = ["shell" + "=" + "True", "os" + "." + "system(", "os" + "." + "popen("]
+        for pattern in forbidden:
+            assert pattern not in source
 
     def test_command_outside_allowlist_never_reaches_executed_status(self):
-        pytest.skip("pending implementation: spec-015")
+        """Un comando sin entrada en la allowlist nunca ejecuta, independientemente del
+        permission_mode."""
+        from app.agentic_core.tool_execution import sandbox
+
+        # (tool_key, action_id) inexistente en la allowlist
+        result = sandbox.execute("tool_inexistente", "accion_inexistente", {})
+        assert result["status"] == "failed"
+        assert result["error_code"] == "no_allowlist_entry"
 
     def test_command_parameter_failing_schema_validation_is_rejected(self):
         pytest.skip("pending implementation: spec-015")
@@ -1177,9 +1192,12 @@ class TestEjecucionComandosPermissionModes:
 
         source = inspect.getsource(chat_module._tool_run_code_block)
         assert "command_resuelto" in source
-        # `\bcommand\b` con límite de palabra: no matchea "command_resuelto" (guión bajo es
-        # \w, no hay boundary ahí), solo un acceso literal a `.command` suelto.
-        assert re.search(r"\.command\b", source) is None
+        # Nunca un acceso a un atributo `.command` sobre el objeto `tool_run` en sí (el modelo
+        # `ToolRun` ni siquiera tiene ese campo, ver `app/models/tool_run.py`) -- se busca el
+        # patrón de acceso real (`tool_run.command` sin el sufijo `_resuelto`), no una mención
+        # textual de "actions[].command" en comentarios/docstrings (que sí puede aparecer como
+        # referencia explicativa de lo que NUNCA se usa).
+        assert re.search(r"tool_run\.command\b", source) is None
 
     async def test_accept_edit_tool_run_shows_editable_command_resuelto_with_approve_reject_buttons(
         self, db_session, monkeypatch
