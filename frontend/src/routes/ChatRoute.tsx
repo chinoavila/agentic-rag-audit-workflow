@@ -12,7 +12,6 @@ import {
   updateChatPermissionMode,
 } from "@/lib/backend";
 import { ApiError } from "@/lib/api";
-import { StatusPill } from "@/components/StatusPill";
 import { PermissionModeSelector } from "@/components/chat/PermissionModeSelector";
 import { ToolRunCard } from "@/components/chat/ToolRunCard";
 import { useRightPanel } from "@/context/RightPanelContext";

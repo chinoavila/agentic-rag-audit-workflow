@@ -191,6 +191,121 @@ def _fake_search_evidence(chunks_text: str = ""):
     return _handler
 
 
+# ---------------------------------------------------------------------------
+# Helpers para los tests de "UI (chainlit-ui)" (Task 13): fakes de `cl.Message`/`cl.Action`/
+# `cl.AskUserMessage` que no requieren un contexto de sesión Chainlit real -- mismo patrón que
+# `tests/specs/test_spec_006_human_in_the_loop.py::
+# test_chainlit_exposes_approve_reject_action_for_pending_review`. Se ejercita directamente el
+# código de `chainlit_ui/chat.py` (nunca un test "de UI" contra un navegador real -- no hay
+# ningún harness E2E de Chainlit en este repo).
+# ---------------------------------------------------------------------------
+
+
+class _FakeCLAction:
+    def __init__(self, name: str, payload: dict, label: str = "", **kwargs: Any) -> None:
+        self.name = name
+        self.payload = payload
+        self.label = label
+        self.removed = False
+
+    async def remove(self) -> None:
+        self.removed = True
+
+
+class _FakeCLMessage:
+    def __init__(self, content: str = "", actions: list | None = None, **kwargs: Any) -> None:
+        self.content = content
+        self.actions = actions or []
+
+    async def send(self) -> "_FakeCLMessage":
+        _SENT_CL_MESSAGES.append(self)
+        return self
+
+    async def update(self) -> "_FakeCLMessage":
+        return self
+
+    async def stream_token(self, chunk: str) -> None:
+        self.content += chunk
+
+
+# Lista compartida donde `_FakeCLMessage.send()` acumula los mensajes "enviados" -- cada test
+# la vacía vía `_patch_cl_message_and_action` (fixture-like helper, no un fixture de pytest real
+# porque necesita el `monkeypatch` del test que la llama).
+_SENT_CL_MESSAGES: list[_FakeCLMessage] = []
+
+
+def _patch_cl_message_and_action(monkeypatch: pytest.MonkeyPatch) -> tuple[Any, list[_FakeCLMessage]]:
+    """Monkeypatchea `chainlit_ui.chat.cl.Message`/`cl.Action` con los fakes de arriba. Devuelve
+    `(chat_module, sent_messages)` -- `sent_messages` es la lista (vacía al llamar esta función)
+    donde queda cada `_FakeCLMessage` en el orden en que se mandó.
+    """
+    from chainlit_ui import chat as chat_module
+
+    _SENT_CL_MESSAGES.clear()
+    monkeypatch.setattr(chat_module.cl, "Message", _FakeCLMessage)
+    monkeypatch.setattr(chat_module.cl, "Action", _FakeCLAction)
+    return chat_module, _SENT_CL_MESSAGES
+
+
+def _patch_cl_ask_user_message(monkeypatch: pytest.MonkeyPatch, output_text: str | None) -> list[str]:
+    """Monkeypatchea `chainlit_ui.chat.cl.AskUserMessage` (mismo patrón que ya usa
+    `on_new_project`/`on_invoke_tool_explicit`, ver `chainlit_ui/chat.py`) para devolver
+    `{"output": output_text}` sin esperar input real de un usuario. Devuelve la lista de
+    `content` con los que se instanció `cl.AskUserMessage`, para poder aserir que el flujo de
+    edición REALMENTE pasó por ese patrón (spec-015: "vía cl.AskUserMessage, mismo patrón que ya
+    usa el archivo").
+    """
+    from chainlit_ui import chat as chat_module
+
+    prompts: list[str] = []
+
+    class _FakeAskUserMessage:
+        def __init__(self, content: str = "", timeout: int = 60, **kwargs: Any) -> None:
+            prompts.append(content)
+
+        async def send(self) -> dict | None:
+            return {"output": output_text} if output_text is not None else None
+
+    monkeypatch.setattr(chat_module.cl, "AskUserMessage", _FakeAskUserMessage)
+    return prompts
+
+
+def _patch_chat_module_session_local(monkeypatch: pytest.MonkeyPatch, db_session: Any) -> None:
+    """`chainlit_ui.chat` abre sus propias sesiones vía `SessionLocal()` (mismo patrón que el
+    resto del módulo, ver docstring de `chainlit_ui/chat.py`, punto 6) -- ese `SessionLocal`
+    apunta por defecto al engine real de `AUDIT_DATABASE_URL` (`app/db.py`), nunca a la DB
+    in-memory de test. Cualquier test que ejercite un camino de `chainlit_ui.chat` que escriba/
+    lea vía `SessionLocal()` (`on_approve_tool_run`, `on_reject_tool_run`,
+    `on_edit_and_approve_tool_run`, `_update_chat_permission_mode`) DEBE llamar esto primero
+    para que esas sesiones nuevas se abran sobre el mismo engine in-memory que `db_session`
+    -- si no, terminan consultando una DB distinta (vacía) y todo camino real resuelve 404.
+    """
+    from sqlalchemy.orm import sessionmaker
+
+    from chainlit_ui import chat as chat_module
+
+    monkeypatch.setattr(chat_module, "SessionLocal", sessionmaker(bind=db_session.get_bind()))
+
+
+def _seed_accept_edit_proposed_tool_run(db_session: Any, *, permission_mode: str = "accept_edit") -> "ToolRun":
+    """Crea un `ToolRun` en `status=proposed` directo vía `propose_tool_run` (mismo módulo que
+    usa el loop real, `app/services/tool_run_execution.py`) para los tests de renderizado de
+    `chainlit_ui.chat` que no necesitan pasar por el loop de tool-calling completo.
+    """
+    from app.services.tool_run_execution import propose_tool_run
+
+    _seed_sandbox_example_tool(db_session)
+    chat = _make_chat(db_session, permission_mode=permission_mode)
+    return propose_tool_run(
+        db_session,
+        chat,
+        "_sandbox_example",
+        "echo_message",
+        {"message": "ok"},
+        triggered_by="llm",
+    )
+
+
 @pytest.mark.spec_015
 class TestEjecucionComandosPermissionModes:
     """Spec-015: Ejecución de Comandos con Permission Modes de Chat y ToolRun (.ai/specs/audit/spec-015-ejecucion-comandos-permission-modes.md)"""
@@ -936,64 +1051,345 @@ class TestEjecucionComandosPermissionModes:
         db_session.refresh(chat)
         assert chat.permission_mode == "manual"
 
-    # --- UI (chainlit-ui) ---
+    # --- UI (chainlit-ui, Task 13) ---
+    #
+    # Los primeros cuatro tests de acá abajo (más `..._read_only_command_when_sandbox_does_not_
+    # allow_variable_params`, más abajo entre los de ToolRun) ejercitan comportamiento puramente
+    # visual/de-render de React (`PermissionModeSelector.tsx`/`ToolRunCard.tsx`) sin ninguna
+    # contraparte de lógica de negocio testeable con pytest -- no hay ningún test runner de JS
+    # (vitest/jest) configurado en este repo (`frontend/package.json` no declara ninguno). Están
+    # implementados (`frontend/src/components/chat/PermissionModeSelector.tsx`,
+    # `frontend/src/routes/ChatRoute.tsx`) pero permanecen documentados como no cubiertos por
+    # pytest en vez de inventar una aserción falsa contra un DOM que no se renderiza acá.
 
     def test_permission_mode_selector_visible_in_chat_header_react(self):
-        pytest.skip("pending implementation: spec-015")
+        pytest.skip(
+            "UI puramente visual de React (PermissionModeSelector.tsx en el header de "
+            "ChatRoute.tsx) -- sin test runner JS en este repo (frontend/package.json no "
+            "declara vitest/jest), no testeable con pytest."
+        )
 
     def test_permission_mode_selector_available_for_standalone_and_case_chats(self):
-        pytest.skip("pending implementation: spec-015")
+        pytest.skip(
+            "UI puramente visual de React -- el selector se monta incondicionalmente en el "
+            "header de ChatRoute.tsx (no hay una rama condicional por case_id nulo/no-nulo, "
+            "ver el componente), pero verificarlo en el DOM requiere un test runner JS "
+            "inexistente en este repo."
+        )
 
     def test_patch_chat_permission_mode_updates_selector_and_reverts_on_error(self):
-        pytest.skip("pending implementation: spec-015")
+        pytest.skip(
+            "Comportamiento de UI optimista + revert de React Query "
+            "(ChatRoute.tsx::permissionModeMutation, onError revierte queryClient.setQueryData) "
+            "-- sin test runner JS en este repo, no testeable con pytest. El contrato de API "
+            "subyacente (PATCH /api/chats/{id} con permission_mode inválido/válido) ya está "
+            "cubierto en la sección 'Persistencia' de este archivo."
+        )
 
     def test_new_chat_selector_defaults_to_manual_and_patches_after_first_creation(self):
-        pytest.skip("pending implementation: spec-015")
+        pytest.skip(
+            "Comportamiento de React (ChatRoute.tsx: useState('manual') como "
+            "draftPermissionMode antes de crear el chat, aplicado vía updateChatPermissionMode "
+            "recién dentro de sendMutation tras createChat) -- sin test runner JS, no testeable "
+            "con pytest."
+        )
 
-    def test_changing_permission_mode_mid_conversation_does_not_alter_existing_tool_run_cards_snapshot(self):
-        pytest.skip("pending implementation: spec-015")
+    def test_changing_permission_mode_mid_conversation_does_not_alter_existing_tool_run_cards_snapshot(
+        self, client, db_session
+    ):
+        """Invariante de datos que sostiene el comportamiento de UI descrito por este test case
+        (ninguna de las dos UIs re-evalúa una tarjeta de `ToolRun` ya propuesta cuando cambia
+        `Chat.permission_mode`): el `permission_mode_snapshot` de un `ToolRun` ya creado nunca
+        cambia aunque el `Chat` que lo originó cambie de modo después -- verificado acá contra
+        el contrato de API real que ambas UIs consumen (`GET /api/chats/{chat_id}/tool-runs`),
+        no contra el renderizado en sí.
+        """
+        _seed_sandbox_example_tool(db_session)
+        chat_id = _create_chat(client, permission_mode="accept_edit")
 
-    def test_degraded_auto_tool_run_shows_explicit_badge_without_changing_selector_displayed_value(self):
-        pytest.skip("pending implementation: spec-015")
+        propose = client.post(
+            f"/api/chats/{chat_id}/tool-runs",
+            json={"tool_key": "_sandbox_example", "action_id": "echo_message", "params": {"message": "ok"}},
+        )
+        assert propose.status_code == 201, propose.text
+        tool_run_id = propose.json()["id"]
+        assert propose.json()["permission_mode_snapshot"] == "accept_edit"
+
+        patch_resp = client.patch(f"/api/chats/{chat_id}", json={"permission_mode": "manual"})
+        assert patch_resp.status_code == 200, patch_resp.text
+        assert patch_resp.json()["permission_mode"] == "manual"
+
+        listing = client.get(f"/api/chats/{chat_id}/tool-runs")
+        assert listing.status_code == 200
+        refreshed = next(t for t in listing.json() if t["id"] == tool_run_id)
+        assert refreshed["permission_mode_snapshot"] == "accept_edit"
+
+    async def test_degraded_auto_tool_run_shows_explicit_badge_without_changing_selector_displayed_value(
+        self, db_session, monkeypatch
+    ):
+        """Invariante de datos que sostiene el badge de "degradado" de ambas UIs: cuando una
+        propuesta se degrada de `auto` a aprobación manual (origen no verificado, spec-005), el
+        `ToolRun.permission_mode_snapshot` queda en `"auto"` (lo que dispara el badge en
+        `ToolRunCard.tsx`/`chainlit_ui.chat._render_pending_tool_run`) mientras
+        `Chat.permission_mode` -- lo que muestra el selector -- sigue siendo `"auto"` sin
+        cambiar: la degradación es puntual a esa propuesta, nunca reconfigura el chat.
+        """
+        _patch_dynamic_tools(monkeypatch)
+        monkeypatch.setitem(loop_module.TOOL_DISPATCH, "search_evidence", _fake_search_evidence())
+        chat = _make_chat(db_session, permission_mode="auto")
+
+        responses = [
+            _tool_call_response("call_1", "search_evidence", {"query": "algo"}),
+            _tool_call_response(
+                "call_2", "_sandbox_example", {"action_id": "echo_message", "params": {"message": "ok"}}
+            ),
+        ]
+        monkeypatch.setattr(loop_module, "get_client", lambda: _FakeAsyncClient(responses))
+
+        result = await loop_module.run_agent_turn(
+            "buscá y después ejecutá", [], db_session, chat_id=chat.id
+        )
+
+        tool_run = db_session.get(ToolRun, result.pending_tool_run_id)
+        assert tool_run.status == "proposed"
+        assert tool_run.permission_mode_snapshot == "auto"  # dispara el badge de "degradado"
+
+        db_session.refresh(chat)
+        assert chat.permission_mode == "auto"  # el selector NUNCA cambia por la degradación
 
     def test_ui_never_renders_raw_tool_catalog_entry_command_only_command_resuelto(self):
-        pytest.skip("pending implementation: spec-015")
+        """`ToolRunOut` (único shape que ambas UIs consumen para renderizar un `ToolRun`) no
+        expone en absoluto el texto crudo de `ToolCatalogEntry.actions[].command` -- no hay
+        campo `command`/`actions` en su schema. Se confirma también inspeccionando el código de
+        renderizado real de Chainlit (`_tool_run_code_block`): arma el bloque de código
+        exclusivamente desde `tool_run.command_resuelto`.
+        """
+        import inspect
+        import re
 
-    def test_accept_edit_tool_run_shows_editable_command_resuelto_with_approve_reject_buttons(self):
-        pytest.skip("pending implementation: spec-015")
+        from app.schemas.tool_run import ToolRunOut
+        from chainlit_ui import chat as chat_module
+
+        fields = ToolRunOut.model_fields
+        assert "command_resuelto" in fields
+        assert "command" not in fields
+        assert "actions" not in fields
+
+        source = inspect.getsource(chat_module._tool_run_code_block)
+        assert "command_resuelto" in source
+        # `\bcommand\b` con límite de palabra: no matchea "command_resuelto" (guión bajo es
+        # \w, no hay boundary ahí), solo un acceso literal a `.command` suelto.
+        assert re.search(r"\.command\b", source) is None
+
+    async def test_accept_edit_tool_run_shows_editable_command_resuelto_with_approve_reject_buttons(
+        self, db_session, monkeypatch
+    ):
+        """Representante testeable con pytest de este criterio, vía Chainlit (la contraparte
+        React -- `ToolRunCard.tsx`, `<textarea>` editable + botones Aprobar/Rechazar -- no tiene
+        test runner JS para cubrirse acá, pero implementa el mismo contrato de datos)."""
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="accept_edit")
+
+        await chat_module._render_pending_tool_run(tool_run)
+
+        assert len(sent) == 1
+        msg = sent[0]
+        assert tool_run.command_resuelto in msg.content
+        action_names = {a.name for a in msg.actions}
+        assert action_names == {"approve_tool_run", "edit_and_approve_tool_run", "reject_tool_run"}
+        for action in msg.actions:
+            assert action.payload == {"tool_run_id": tool_run.id}
 
     def test_accept_edit_tool_run_shows_read_only_command_when_sandbox_does_not_allow_variable_params(self):
-        pytest.skip("pending implementation: spec-015")
+        pytest.skip(
+            "Distinción read-only vs. editable según si la allowlist admite parámetros "
+            "variables es una decisión de UI exclusiva de React (ToolRunCard.tsx) -- "
+            "ToolRunOut no expone esa metadata al cliente y el flujo de Chainlit "
+            "(edit_and_approve_tool_run vía AskUserMessage) es uniforme sin importar los "
+            "parámetros de la entrada de la allowlist, así que no hay una rama equivalente "
+            "para ejercitar acá. Sin test runner JS para cubrir la variante de React."
+        )
 
-    def test_manual_tool_run_shows_read_only_command_with_no_execute_or_approve_action(self):
-        pytest.skip("pending implementation: spec-015")
+    async def test_manual_tool_run_shows_read_only_command_with_no_execute_or_approve_action(
+        self, db_session, monkeypatch
+    ):
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="manual")
 
-    def test_manual_tool_run_command_resuelto_is_copyable_via_code_block(self):
-        pytest.skip("pending implementation: spec-015")
+        await chat_module._render_pending_tool_run(tool_run)
 
-    def test_approve_tool_run_sends_patch_and_renders_executed_result_with_output(self):
-        pytest.skip("pending implementation: spec-015")
+        assert len(sent) == 1
+        msg = sent[0]
+        assert tool_run.command_resuelto in msg.content
+        assert msg.actions == []
 
-    def test_reject_tool_run_sends_patch_and_renders_rejected_state(self):
-        pytest.skip("pending implementation: spec-015")
+    async def test_manual_tool_run_command_resuelto_is_copyable_via_code_block(self, db_session, monkeypatch):
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="manual")
 
-    def test_failed_tool_run_shows_structured_error_code_and_error_detail(self):
-        pytest.skip("pending implementation: spec-015")
+        await chat_module._render_pending_tool_run(tool_run)
 
-    def test_chainlit_chat_settings_widget_updates_permission_mode_via_direct_db_write(self):
-        pytest.skip("pending implementation: spec-015")
+        assert len(sent) == 1
+        # Bloque de código fenced Markdown (```...```) -- copiable tal cual desde el chat.
+        assert f"```\n{tool_run.command_resuelto}\n```" in sent[0].content
 
-    def test_chainlit_manual_tool_run_message_has_no_action_buttons(self):
-        pytest.skip("pending implementation: spec-015")
+    @requires_posix
+    async def test_approve_tool_run_sends_patch_and_renders_executed_result_with_output(
+        self, db_session, monkeypatch
+    ):
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        _patch_chat_module_session_local(monkeypatch, db_session)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="accept_edit")
+        action = _FakeCLAction(name="approve_tool_run", payload={"tool_run_id": tool_run.id})
 
-    def test_chainlit_accept_edit_tool_run_offers_approve_edit_and_reject_actions(self):
-        pytest.skip("pending implementation: spec-015")
+        await chat_module.on_approve_tool_run(action)
 
-    def test_chainlit_edit_and_approve_uses_askusermessage_pattern_consistent_with_new_project(self):
-        pytest.skip("pending implementation: spec-015")
+        assert action.removed is True
+        db_session.refresh(tool_run)
+        assert tool_run.status == "executed"
+        assert tool_run.resolved_by is not None
+        assert tool_run.triggered_by == "human"
+
+        assert len(sent) == 1
+        assert f"exit_code={tool_run.exit_code}" in sent[0].content
+        assert (tool_run.stdout or "") in sent[0].content
+
+    async def test_reject_tool_run_sends_patch_and_renders_rejected_state(self, db_session, monkeypatch):
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        _patch_chat_module_session_local(monkeypatch, db_session)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="accept_edit")
+        action = _FakeCLAction(name="reject_tool_run", payload={"tool_run_id": tool_run.id})
+
+        await chat_module.on_reject_tool_run(action)
+
+        assert action.removed is True
+        db_session.refresh(tool_run)
+        assert tool_run.status == "rejected"
+        assert tool_run.resolved_by is not None
+
+        assert len(sent) == 1
+        assert "rechazado" in sent[0].content.lower()
+
+    async def test_failed_tool_run_shows_structured_error_code_and_error_detail(self, db_session, monkeypatch):
+        """`(tool_key, action_id)` sin entrada en la allowlist -- `execute_tool_run` nunca
+        invoca un subproceso real acá (resuelve `error_code="no_allowlist_entry"` de inmediato
+        en `app/agentic_core/tool_execution/sandbox.py::execute`), así que este test no depende
+        de POSIX.
+        """
+        from app.services.tool_run_execution import propose_tool_run
+
+        _seed_sandbox_example_tool(db_session)
+        chat = _make_chat(db_session, permission_mode="accept_edit")
+        tool_run = propose_tool_run(
+            db_session, chat, "_sandbox_example", "no_such_action", {}, triggered_by="llm"
+        )
+
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        _patch_chat_module_session_local(monkeypatch, db_session)
+        action = _FakeCLAction(name="approve_tool_run", payload={"tool_run_id": tool_run.id})
+
+        await chat_module.on_approve_tool_run(action)
+
+        db_session.refresh(tool_run)
+        assert tool_run.status == "failed"
+        assert tool_run.error_code == "no_allowlist_entry"
+
+        assert len(sent) == 1
+        assert tool_run.error_code in sent[0].content
+        assert (tool_run.error_detail or "") in sent[0].content
+
+    async def test_chainlit_chat_settings_widget_updates_permission_mode_via_direct_db_write(
+        self, db_session, monkeypatch
+    ):
+        """`_update_chat_permission_mode` (invocada por `@cl.on_settings_update`) persiste el
+        cambio vía `app.routers.chats.patch_chat` -- escritura DB real, no un mock. Se
+        monkeypatchea `chat_module.SessionLocal` para que abra sesiones sobre el mismo engine
+        in-memory que `db_session` (mismo criterio que usa el resto de este archivo para no
+        tocar la DB de desarrollo real).
+        """
+        from chainlit_ui import chat as chat_module
+
+        chat = _make_chat(db_session, permission_mode="manual")
+        _patch_chat_module_session_local(monkeypatch, db_session)
+
+        updated = await chat_module._update_chat_permission_mode(chat.id, "auto")
+
+        assert updated is not None
+        assert updated.permission_mode == "auto"
+        db_session.refresh(chat)
+        assert chat.permission_mode == "auto"
+
+    async def test_chainlit_manual_tool_run_message_has_no_action_buttons(self, db_session, monkeypatch):
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="manual")
+
+        await chat_module._render_pending_tool_run(tool_run)
+
+        assert len(sent) == 1
+        assert sent[0].actions == []
+
+    async def test_chainlit_accept_edit_tool_run_offers_approve_edit_and_reject_actions(
+        self, db_session, monkeypatch
+    ):
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="accept_edit")
+
+        await chat_module._render_pending_tool_run(tool_run)
+
+        assert len(sent) == 1
+        action_names = {a.name for a in sent[0].actions}
+        assert action_names == {"approve_tool_run", "edit_and_approve_tool_run", "reject_tool_run"}
+
+    async def test_chainlit_edit_and_approve_uses_askusermessage_pattern_consistent_with_new_project(
+        self, db_session, monkeypatch
+    ):
+        """`on_edit_and_approve_tool_run` pide el comando editado vía `cl.AskUserMessage`, el
+        MISMO patrón que ya usa `on_new_project` (`chainlit_ui/chat.py`) para pedir texto libre
+        -- nunca un widget de edición inline distinto."""
+        chat_module, sent = _patch_cl_message_and_action(monkeypatch)
+        _patch_chat_module_session_local(monkeypatch, db_session)
+        edited_command = "/bin/echo pong"
+        prompts = _patch_cl_ask_user_message(monkeypatch, edited_command)
+        tool_run = _seed_accept_edit_proposed_tool_run(db_session, permission_mode="accept_edit")
+        action = _FakeCLAction(
+            name="edit_and_approve_tool_run", payload={"tool_run_id": tool_run.id}
+        )
+
+        await chat_module.on_edit_and_approve_tool_run(action)
+
+        assert len(prompts) == 1  # se instanció exactamente un cl.AskUserMessage
+        assert action.removed is True
+        db_session.refresh(tool_run)
+        assert tool_run.command_resuelto == edited_command
+        assert tool_run.status in ("executed", "failed")  # PATCH con status=approved ya corrió
 
     def test_no_free_text_parsing_resolves_tool_run_approval_in_either_ui(self):
-        pytest.skip("pending implementation: spec-015")
+        """Ninguna superficie permite aprobar/rechazar un `ToolRun` por texto libre -- siempre
+        una acción tipada (`cl.Action` en Chainlit / botón de `ToolRunCard.tsx` contra `PATCH
+        /api/tool-runs/{id}` en React). Verificado estructuralmente por inspección de código
+        (única forma testeable con pytest sin un contexto de sesión Chainlit real, que
+        `on_message` requiere vía `cl.user_session` -- ver `chainlit.context.
+        ChainlitContextException` si se invoca fuera de una sesión real): `on_message` (el
+        handler de texto libre del usuario) nunca referencia `patch_tool_run`/
+        `_patch_tool_run_action`, a diferencia de los tres `@cl.action_callback` tipados
+        (`approve_tool_run`/`reject_tool_run`/`edit_and_approve_tool_run`), que son el ÚNICO
+        lugar del módulo que sí los referencia.
+        """
+        import inspect
+
+        from chainlit_ui import chat as chat_module
+
+        on_message_source = inspect.getsource(chat_module.on_message)
+        assert "patch_tool_run" not in on_message_source
+        assert "_patch_tool_run_action" not in on_message_source
+
+        typed_callbacks = ("on_approve_tool_run", "on_reject_tool_run", "on_edit_and_approve_tool_run")
+        for callback_name in typed_callbacks:
+            callback_source = inspect.getsource(getattr(chat_module, callback_name))
+            assert "_patch_tool_run_action" in callback_source
+            # Cada callback tipado recibe un `cl.Action` real (no texto libre) y lee
+            # `tool_run_id` exclusivamente de `action.payload` -- nunca de `message.content`.
+            assert "action.payload" in callback_source
 
 
 @pytest.mark.spec_015
