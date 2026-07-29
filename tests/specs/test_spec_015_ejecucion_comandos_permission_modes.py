@@ -574,7 +574,7 @@ class TestEjecucionComandosPermissionModes:
         from app.models.tool_run import ToolRun
 
         _seed_sandbox_example_tool(db_session)
-        audit_case = AuditCase(name="Test case")
+        audit_case = AuditCase(id="case_tool_run_test", name="Test case")
         db_session.add(audit_case)
         db_session.commit()
 
@@ -876,7 +876,7 @@ class TestEjecucionComandosPermissionModes:
         """Se puede cambiar permission_mode en un chat de proyecto (case_id != NULL)."""
         from app.models.audit_case import AuditCase
 
-        audit_case = AuditCase(name="Test case")
+        audit_case = AuditCase(id="case_perm_mode_test", name="Test case")
         db_session.add(audit_case)
         db_session.commit()
 

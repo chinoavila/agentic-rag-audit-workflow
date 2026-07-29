@@ -8,8 +8,9 @@ estado de implementación.
 
 ## Estado de Especificaciones (SDD)
 
-**~119 tests** (70 passing, ~49 skipped intencionalmente — los skips corresponden a
-las specs 007, 013 y 015, aún sin implementar).
+**210 tests** (201 passing, 9 skipped intencionalmente — 4 corresponden a spec-007, aún sin
+implementar, y 5 son casos de UI de React puramente visuales sin runner de tests JS en el repo,
+documentados caso por caso en `tests/specs/test_spec_015_ejecucion_comandos_permission_modes.py`).
 
 | Spec | Dominio | Estado | Tests | Descripción |
 |------|---------|--------|-------|-------------|
@@ -25,12 +26,12 @@ las specs 007, 013 y 015, aún sin implementar).
 | **010** | Backend | ✅ Implementada | Pasando | Contrato de error uniforme: respuestas de error estructuradas |
 | **011** | Audit Tools | ✅ Implementada | Pasando | Inmutabilidad de reportes generados: append-only, soft-supersede (`app/models/report.py`) |
 | **012** | Audit Tools | ✅ Implementada | Pasando | Generación de informes desde plantilla + rúbricas automáticas (`app/reports/`) |
-| **013** | RAG | ❌ Pendiente | Skip | Exposición dinámica de tools vía retrieval |
-| **015** | Backend/Tools | ❌ Pendiente | Skip | Ejecución de comandos con permission modes de chat y ToolRun append-only |
+| **013** | RAG | ✅ Implementada | Pasando | Exposición dinámica de tools vía retrieval: elegibilidad default-on (`ToolCatalogEntry.installed`) con override por proyecto (`ProjectTool.enabled`), umbral de relevancia aplicado solo sobre el subconjunto elegible |
+| **015** | Backend/Tools | ✅ Implementada | Pasando | Ejecución de comandos con permission modes de chat (`auto`/`accept_edit`/`manual`), sandbox aislado con allowlist, y `ToolRun` append-only (`app/agentic_core/tool_execution/`, `app/services/tool_run_execution.py`) |
 
 **Resumen:**
-- **Completamente implementadas:** 001, 002, 003, 004, 005, 006, 008, 009, 010, 011, 012 (11 specs)
-- **Pendientes:** 007 (auth real), 013 (tool retrieval dinámico con allowlist estructural), 015 (ejecución de comandos con sandbox + permission modes) — 3 specs para próximos slices
+- **Completamente implementadas:** 001, 002, 003, 004, 005, 006, 008, 009, 010, 011, 012, 013, 015 (13 specs)
+- **Pendiente:** 007 (auth real) — próximo slice
 
 Además del catálogo formal de arriba, el código referencia specs informales (014, 017, 018,
 020) introducidas junto con la migración a frontend React — cubren el catálogo de tools,
@@ -49,11 +50,19 @@ Los siguientes gaps son conocidos, no son bugs escondidos, y están documentados
 
 | Gap | Impacto | Dueño | Próximo Paso |
 |-----|---------|-------|--------------|
-| **Sin allowlist de tools según contexto** | LLM puede invocar tools incluso si la instrucción vino de contenido del documento (riesgo de prompt injection). Parcialmente mitigado por diseño turn-based + prompt. | `agentic-core` + `chainlit-ui` | Implementar allowlist estructural en runtime. |
 | **Sin redacción/filtrado de PII** | Contenido de chunks re-expuesto al LLM puede contener PII sin sanitizar. | `rag-engineer` o `security-compliance` | Agregar pipeline de redacción en retrieval. |
 | **Auth es stub (dev-user-0 fijo)** | Sin aislamiento real de datos por usuario. Bloquea spec-007. | `backend-api` | Implementar auth real (JWT, OIDC, etc.) con aislamiento de datos. |
 
-Estos gaps quedan para el próximo slice (specs 007 y 013).
+La allowlist estructural de tools por contexto (antes un gap sin dueño) quedó resuelta por
+spec-013 (elegibilidad default-on/override) y spec-015 (permission modes de chat + sandbox de
+ejecución) — ver `docs/plans/plan-tool-execution-permission-modes.md`. Queda un gap residual
+documentado en el propio código (`app/agentic_core/tool_execution/sandbox.py`): el aislamiento de
+red saliente no está garantizado a nivel de kernel dentro del contenedor actual (sin
+`CAP_NET_ADMIN`); mitigado hoy con fail-closed (ninguna entrada de allowlist con `network_hosts`
+se ejecuta), pero requiere una imagen base con soporte real de namespaces de red (o un sidecar de
+ejecución) antes de habilitar una tool que necesite acceso a red.
+
+Queda para el próximo slice: spec-007 (auth real).
 
 ---
 
@@ -104,7 +113,6 @@ Desde este slice inicial ya se sumó, además, la migración a frontend React (s
 
 ---
 
-**Última actualización:** 2026-07-28
-**Próximo hito:** cerrar spec-007 (auth real), spec-013 (tool retrieval dinámico con allowlist estructural)
-y spec-015 (ejecución de comandos con sandbox + permission modes de chat); formalizar
-las specs informales 014/017/018/020 con su spec doc SDD y test spec propios.
+**Última actualización:** 2026-07-29
+**Próximo hito:** cerrar spec-007 (auth real); formalizar las specs informales 014/017/018/020 con
+su spec doc SDD y test spec propios.
