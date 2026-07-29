@@ -2,11 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { createChat, getChat, getMessages, getProject, postMessage } from "@/lib/backend";
+import {
+  createChat,
+  getChat,
+  getMessages,
+  getProject,
+  getToolRuns,
+  postMessage,
+  updateChatPermissionMode,
+} from "@/lib/backend";
 import { ApiError } from "@/lib/api";
 import { StatusPill } from "@/components/StatusPill";
+import { PermissionModeSelector } from "@/components/chat/PermissionModeSelector";
+import { ToolRunCard } from "@/components/chat/ToolRunCard";
 import { useRightPanel } from "@/context/RightPanelContext";
-import type { ChatMessage } from "@/types/domain";
+import type { ChatMessage, ChatSummary, PermissionMode } from "@/types/domain";
 
 // Chat view: usa /api/chats/{id}/messages real vía src/lib/backend.ts::postMessage.
 // Sin streaming real (decisión del plan): revela `final_text` palabra por palabra, igual que
@@ -17,6 +27,22 @@ export function ChatRoute() {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
+
+  // Selector de `permission_mode` (spec-015): mientras el chat todavía no existe (borrador de
+  // chat nuevo), no hay `Chat` real donde persistir el valor -- se guarda acá y se aplica con
+  // un `PATCH` recién después de `createChat` (ver `sendMutation` abajo). Se resetea a "manual"
+  // (default del backend) cada vez que cambia de chat/ruta.
+  const [draftPermissionMode, setDraftPermissionMode] = useState<PermissionMode>("manual");
+  // `ToolRun` puntual que dejó pausado el último turno (spec-015) -- ver `pendingToolRunId` de
+  // `postMessage`. Se resetea al cambiar de chat; se recupera también al recargar la página
+  // (ver el `useEffect` que barre `toolRunsQuery.data` más abajo) para no perder un turno
+  // pausado si el usuario refresca antes de aprobar/rechazar.
+  const [pendingToolRunId, setPendingToolRunId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDraftPermissionMode("manual");
+    setPendingToolRunId(null);
+  }, [chatId]);
 
   const chatQuery = useQuery({
     queryKey: ["chats", chatId],
@@ -33,6 +59,50 @@ export function ChatRoute() {
     queryFn: () => getMessages(chatId as string),
     enabled: !!chatId,
   });
+  // Sin filtro de status: conserva en la lista los ToolRun ya resueltos de este turno (para
+  // poder mostrar su estado terminal -- executed/failed/rejected) además de los `proposed`
+  // pendientes. Acotado por diseño al alcance de un chat individual (prototipo).
+  const toolRunsQuery = useQuery({
+    queryKey: ["tool-runs", chatId],
+    queryFn: () => getToolRuns(chatId as string),
+    enabled: !!chatId,
+  });
+
+  // Recupera un turno pausado tras un refresh de página: si no hay ningún `pendingToolRunId`
+  // en memoria pero el chat tiene un `ToolRun` en `status=proposed`, lo adopta.
+  useEffect(() => {
+    if (pendingToolRunId || !toolRunsQuery.data) return;
+    const proposed = toolRunsQuery.data.find((t) => t.status === "proposed");
+    if (proposed) setPendingToolRunId(proposed.id);
+  }, [toolRunsQuery.data, pendingToolRunId]);
+
+  const permissionModeMutation = useMutation({
+    mutationFn: ({ id, mode }: { id: string; mode: PermissionMode }) => updateChatPermissionMode(id, mode),
+    onMutate: async ({ id, mode }) => {
+      await queryClient.cancelQueries({ queryKey: ["chats", id] });
+      const previous = queryClient.getQueryData<ChatSummary>(["chats", id]);
+      queryClient.setQueryData<ChatSummary | undefined>(["chats", id], (old) =>
+        old ? { ...old, permissionMode: mode } : old,
+      );
+      return { previous };
+    },
+    onError: (_err, { id }, context) => {
+      // Revierte al valor anterior si el PATCH falla (spec-015: "revertir si falla").
+      if (context?.previous) queryClient.setQueryData(["chats", id], context.previous);
+    },
+    onSuccess: (updated) => {
+      queryClient.setQueryData(["chats", updated.id], updated);
+    },
+  });
+
+  const handlePermissionModeChange = (mode: PermissionMode) => {
+    if (!chatId) {
+      // Todavía no hay un `Chat` real -- se aplica recién cuando se crea (ver sendMutation).
+      setDraftPermissionMode(mode);
+      return;
+    }
+    permissionModeMutation.mutate({ id: chatId, mode });
+  };
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
@@ -40,13 +110,18 @@ export function ChatRoute() {
       if (!id) {
         const chat = await createChat(projectId ?? null);
         id = chat.id;
+        if (draftPermissionMode !== "manual") {
+          await updateChatPermissionMode(id, draftPermissionMode);
+        }
       }
-      await postMessage(id, content);
-      return id;
+      const result = await postMessage(id, content);
+      return { id, result };
     },
-    onSuccess: (id) => {
+    onSuccess: ({ id, result }) => {
       queryClient.invalidateQueries({ queryKey: ["messages", id] });
       queryClient.invalidateQueries({ queryKey: ["chats"] });
+      queryClient.invalidateQueries({ queryKey: ["tool-runs", id] });
+      setPendingToolRunId(result.pendingToolRunId);
       if (!chatId) {
         navigate(projectId ? `/projects/${projectId}/chats/${id}` : `/chats/${id}`);
       }
@@ -67,6 +142,10 @@ export function ChatRoute() {
   const messages = messagesQuery.data ?? [];
   const project = projectQuery.data;
   const chat = chatQuery.data;
+  const permissionMode = chat?.permissionMode ?? (chatId ? "manual" : draftPermissionMode);
+  const activeToolRun = pendingToolRunId
+    ? toolRunsQuery.data?.find((t) => t.id === pendingToolRunId)
+    : undefined;
   const pendingContent = sendMutation.isPending ? sendMutation.variables : undefined;
   const errorMessage =
     sendMutation.isError
@@ -88,6 +167,11 @@ export function ChatRoute() {
           </Link>
         )}
         <div className="text-[14.5px] font-semibold">{chat?.title ?? "Nuevo chat"}</div>
+        <PermissionModeSelector
+          value={permissionMode}
+          onChange={handlePermissionModeChange}
+          disabled={permissionModeMutation.isPending}
+        />
       </div>
 
       {showThread ? (
@@ -114,6 +198,7 @@ export function ChatRoute() {
                 <ThinkingBubble />
               </>
             )}
+            {activeToolRun && <ToolRunCard toolRun={activeToolRun} />}
           </div>
         </div>
       ) : (

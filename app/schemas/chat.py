@@ -81,8 +81,16 @@ class ChatTurnRequest(BaseModel):
 class ChatTurnResponse(BaseModel):
     """Resultado de un turno completo, con las filas ya persistidas (para que el frontend no
     tenga que hacer un segundo `GET /messages` solo para obtener los ids nuevos).
+
+    `pending_tool_run_id` (spec-015, Task 13, `chainlit-ui`): espejo directo de
+    `AgentTurnResult.pending_tool_run_id` (`app/agentic_core/loop.py`) -- campo opcional nuevo,
+    no rompe compatibilidad con clientes existentes que no lo lean. Evita que la UI (React)
+    tenga que hacer un `GET /api/chats/{chat_id}/tool-runs?status=proposed` extra solo para
+    descubrir que el turno recién posteado quedó pausado esperando aprobación humana: si viene
+    no-`None`, el frontend puede pedir directamente ese `ToolRun` puntual.
     """
 
     final_text: str
     hit_max_iterations: bool
     messages: list[MessageOut]
+    pending_tool_run_id: str | None = None

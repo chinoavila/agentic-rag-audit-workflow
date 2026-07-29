@@ -67,11 +67,18 @@ export interface Project {
   updatedAt: string;
 }
 
+// auto | accept_edit | manual (spec-015). Taxonomía cerrada, espejo de
+// `app/schemas/chat.py::PermissionMode`. Default `manual` en la creación de todo `Chat` -- la
+// única forma de que valga `auto` es una acción humana explícita vía `PATCH /api/chats/{id}`
+// (nunca el LLM).
+export type PermissionMode = "auto" | "accept_edit" | "manual";
+
 export interface ChatSummary {
   id: string;
   caseId: string | null;
   title: string | null;
   archived: boolean;
+  permissionMode: PermissionMode;
   updatedAt: string;
 }
 
@@ -87,6 +94,38 @@ export interface ChatMessage {
   toolOutput: Record<string, unknown> | null;
   reportId: string | null;
   createdAt: string;
+}
+
+// Taxonomía cerrada de `ToolRun.status` (spec-015), espejo de
+// `app/schemas/tool_run.py::ToolRunStatus`.
+export type ToolRunStatus = "proposed" | "approved" | "rejected" | "executed" | "failed";
+
+// Set cerrado de `ToolRun.error_code` (spec-015, sandboxing/autorización), espejo de
+// `app/schemas/tool_run.py::ToolRunErrorCode`.
+export type ToolRunErrorCode = "no_allowlist_entry" | "timeout" | "resource_limit_exceeded" | "nonzero_exit";
+
+// Propuesta/ejecución de un comando real de una tool (spec-015), espejo de
+// `ToolRunOut` (`app/schemas/tool_run.py`). Nunca incluye el texto crudo de
+// `ToolCatalogEntry.actions[].command` -- `commandResuelto` es siempre el `argv` ya resuelto
+// por la allowlist de security-compliance, lo único que esta UI puede mostrar (spec-015,
+// sección UI: "Un ToolRun nunca se muestra con el texto crudo de actions[].command").
+export interface ToolRun {
+  id: string;
+  chatId: string;
+  toolKey: string;
+  actionId: string;
+  commandResuelto: string;
+  permissionModeSnapshot: PermissionMode;
+  status: ToolRunStatus;
+  triggeredBy: "human" | "llm";
+  resolvedBy: string | null;
+  errorCode: ToolRunErrorCode | null;
+  errorDetail: string | null;
+  exitCode: number | null;
+  stdout: string | null;
+  stderr: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type ReportStatus = "pending_review" | "published" | "rejected";

@@ -249,4 +249,5 @@ async def post_chat_message(
         final_text=result.final_text,
         hit_max_iterations=result.hit_max_iterations,
         messages=[MessageOut.model_validate(row) for row in persisted],
+        pending_tool_run_id=result.pending_tool_run_id,
     )

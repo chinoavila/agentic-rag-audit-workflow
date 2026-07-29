@@ -54,13 +54,31 @@ re-descubrirlas leyendo el código):
    aislamiento de datos por usuario real todavía. Cerrar ese gap (spec-007 completo:
    autenticación real + filtrar casos/hallazgos por usuario) queda para
    `security-compliance` + `backend-api`, tal como ya lo documenta `app/deps.py`.
+8. **`Chat` real + `permission_mode`/`ToolRun` (spec-015, Task 13)**: hasta esta task,
+   `run_agent_turn` se invocaba sin `chat_id` real -- solo existía `AuditCase` +
+   `cl.user_session["conversation_history"]`. `run_agent_turn` ahora REQUIERE `chat_id`
+   (Task 12), así que esta UI resuelve (o crea) un `Chat` real por `AuditCase` activo
+   (`_resolve_chat_for_case`), lo guarda en `cl.user_session["chat_id"]`, y lo pasa a cada
+   turno. Reusa las funciones de `app/routers/chats.py`/`app/routers/tool_runs.py`
+   directamente (mismo patrón del punto 6: nunca HTTP interno). El selector de
+   `Chat.permission_mode` se expone vía `cl.ChatSettings`/`Select` (`@cl.on_settings_update`
+   persiste el cambio con un `PATCH` real, nunca escribiendo la columna a mano fuera de
+   `patch_chat`). Cuando un turno pausa (`AgentTurnResult.pending_tool_run_id`), esta UI
+   renderiza el `ToolRun` pendiente: sin `cl.Action` si `permission_mode_snapshot == "manual"`
+   (nunca ejecuta, solo bloque de código fenced copiable), con `approve_tool_run`/
+   `edit_and_approve_tool_run`/`reject_tool_run` en cualquier otro caso (`accept_edit`, o
+   `auto` degradado -- distinguible por un aviso explícito en el mensaje, nunca cambiando lo
+   que muestra el selector). Nunca se parsea texto libre del chat para resolver una
+   aprobación: siempre pasa por esas tres `cl.Action` tipadas (regla 4).
 """
 
 from __future__ import annotations
 
 import json
+from typing import get_args
 
 import chainlit as cl
+from chainlit.input_widget import Select
 from fastapi import HTTPException
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
@@ -70,12 +88,24 @@ from app.agentic_core.tools_registry import search_evidence
 from app.db import SessionLocal
 from app.deps import get_current_user
 from app.models.audit_case import AuditCase
+from app.models.chat import Chat
+from app.models.tool_run import ToolRun
+from app.routers.chats import create_chat, patch_chat
 from app.routers.findings import patch_finding
 from app.routers.reports import patch_report
+from app.routers.tool_runs import patch_tool_run
+from app.schemas.chat import ChatCreate, ChatPatch, PermissionMode
 from app.schemas.finding import HIGH_RISK_SEVERITIES, FindingPatch
 from app.schemas.report import ReportPatch
+from app.schemas.tool_run import ToolRunPatch
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
+
+# Taxonomía cerrada de `Chat.permission_mode` (spec-015) -- mismo `Literal` que
+# `app/schemas/chat.py::PermissionMode`, reusado acá para el widget de `cl.ChatSettings` y para
+# validar el valor entrante de `@cl.on_settings_update` (que llega como `dict` sin tipar, nunca
+# validado por Pydantic automáticamente del lado de Chainlit).
+PERMISSION_MODE_VALUES: tuple[str, ...] = get_args(PermissionMode)
 
 # Catálogo de tools mostrado en el sidebar (spec-014). Estático por ahora -- se reemplaza por
 # `app/agentic_core/tool_catalog.py` (Fase 1 del plan de sidebar) cuando exista, que va a ser
@@ -157,18 +187,88 @@ async def _refresh_sidebar(db: Session, active_case_id: str) -> None:
     )
 
 
+def _resolve_chat_for_case(db: Session, case_id: str) -> Chat:
+    """Resuelve (o crea) el `Chat` real de esta sesión para el `AuditCase` activo (spec-015,
+    Task 13 -- ver punto 8 del docstring del módulo).
+
+    Reusa el más reciente no archivado de ese `case_id` en vez de crear uno nuevo por cada
+    `on_chat_start`/cambio de proyecto -- mismo criterio que `on_chat_start` ya aplica para
+    `AuditCase` (arrancar sobre el más reciente en vez de multiplicar filas). Llama
+    `app.routers.chats.create_chat` directamente (punto 6 del docstring: nunca HTTP interno)
+    en vez de instanciar `Chat(...)` a mano, para no duplicar la validación de `case_id`
+    inexistente que ya hace ese endpoint.
+    """
+    chat = (
+        db.query(Chat)
+        .filter(Chat.case_id == case_id, Chat.archived.is_(False))
+        .order_by(Chat.updated_at.desc())
+        .first()
+    )
+    if chat is not None:
+        return chat
+    return create_chat(ChatCreate(case_id=case_id), db=db, current_user=get_current_user())
+
+
+def _permission_mode_settings(permission_mode: str) -> cl.ChatSettings:
+    """Widget de `Chat.permission_mode` (spec-015): un único `Select` por chat -- nunca un
+    control por tool. `initial_value` (no `initial`, ver nota abajo) refleja el
+    `Chat.permission_mode` REAL de la fila resuelta por `_resolve_chat_for_case`, nunca un
+    valor fijo hardcodeado -- "Manual" es el default solo porque es el default de `Chat` en
+    backend (`app/models/chat.py`), no porque este módulo lo fuerce acá.
+
+    Nota de implementación (chainlit==2.11.1, verificado leyendo
+    `chainlit.input_widget.Select.__post_init__`): pasar `initial=` directo al constructor NO
+    tiene efecto -- `__post_init__` siempre recalcula `self.initial` a partir de
+    `initial_value`/`initial_index` cuando se construye con `values=` (lista plana). Por eso
+    acá se pasa `initial_value=permission_mode`, no `initial=permission_mode`.
+    """
+    return cl.ChatSettings(
+        inputs=[
+            Select(
+                id="permission_mode",
+                label="Modo de ejecución de comandos",
+                values=list(PERMISSION_MODE_VALUES),
+                initial_value=permission_mode,
+                description=(
+                    "Auto: ejecuta sin pedir aprobación (solo si vos mismo escribiste el "
+                    "pedido en este turno). Aceptar y editar: revisa/edita el comando antes "
+                    "de correrlo. Manual: el agente nunca ejecuta, solo te muestra el "
+                    "comando."
+                ),
+            )
+        ]
+    )
+
+
+async def _activate_case(db: Session, case: AuditCase) -> Chat:
+    """Activa `case` para esta sesión: resuelve su `Chat` real, guarda ambos ids en
+    `cl.user_session` (regla 3 / spec-007: nunca en una variable de módulo) y redibuja el
+    sidebar. Compartido por `on_chat_start`/`on_new_project`/`on_switch_project` para no
+    triplicar esta secuencia.
+    """
+    chat = _resolve_chat_for_case(db, case.id)
+
+    cl.user_session.set("case_id", case.id)
+    cl.user_session.set("chat_id", chat.id)
+    cl.user_session.set("conversation_history", [])
+
+    await _refresh_sidebar(db, case.id)
+    return chat
+
+
 @cl.on_chat_start
 async def on_chat_start() -> None:
-    """Inicializa la sesión de chat: activa un proyecto y muestra el sidebar de
-    proyectos/herramientas.
+    """Inicializa la sesión de chat: activa un proyecto (con su `Chat` real, spec-015) y
+    muestra el sidebar de proyectos/herramientas + el selector de `permission_mode`.
 
     Si ya existen proyectos (`AuditCase`), esta sesión arranca sobre el más reciente en vez de
     crear uno nuevo cada vez -- el sidebar (`switch_project`/`new_project`) es la forma de
-    cambiar de proyecto o crear uno, mismo patrón que Claude Desktop/ChatGPT/Gemini.
+    cambiar de proyecto o crear uno, mismo patrón que Claude Desktop/ChatGPT/Gemini. Mismo
+    criterio para el `Chat` dentro de ese proyecto (`_resolve_chat_for_case`).
 
-    Aislamiento de sesión (regla 3 / spec-007): `case_id` y `conversation_history` se guardan
-    únicamente en `cl.user_session`, que Chainlit aísla por conexión -- dos usuarios (o dos
-    pestañas) nunca comparten ni pisan el `case_id`/historial del otro.
+    Aislamiento de sesión (regla 3 / spec-007): `case_id`, `chat_id` y `conversation_history`
+    se guardan únicamente en `cl.user_session`, que Chainlit aísla por conexión -- dos usuarios
+    (o dos pestañas) nunca comparten ni pisan el estado del otro.
 
     Esta función abre y cierra su propia `Session` de SQLAlchemy de vida corta (ver
     `on_message` para el manejo de sesión del resto del ciclo de vida del chat).
@@ -177,24 +277,65 @@ async def on_chat_start() -> None:
     try:
         cases = _list_audit_cases(db)
         case = cases[0] if cases else _create_default_audit_case(db)
-
-        cl.user_session.set("case_id", case.id)
-        cl.user_session.set("conversation_history", [])
-
-        await _refresh_sidebar(db, case.id)
+        chat = await _activate_case(db, case)
+        permission_mode = chat.permission_mode
     finally:
         db.close()
+
+    await _permission_mode_settings(permission_mode).send()
 
     await cl.Message(
         content=(
             "Bienvenido a Agentic-RAG Audit Workflow.\n\n"
             f"Proyecto activo: `{case.name}` (`{case.id}`). Usá el sidebar para crear un "
             "proyecto nuevo, cambiar a otro existente, o ejecutar una herramienta "
-            "explícitamente.\n\n"
+            "explícitamente. Usá el ícono de configuración (⚙) del chat para cambiar el modo "
+            f"de ejecución de comandos (actual: `{permission_mode}`).\n\n"
             "Pedime que busque evidencia sobre algún tema en los documentos indexados, o que "
             "registre un hallazgo de auditoría a partir de esa evidencia."
         )
     ).send()
+
+
+@cl.on_settings_update
+async def on_settings_update(settings: dict) -> None:
+    """Persiste el cambio de `permission_mode` disparado desde `cl.ChatSettings` (spec-015).
+
+    Extrae `chat_id` de `cl.user_session` y delega en `_update_chat_permission_mode` (función
+    pura sin dependencia de `cl.user_session`, ver ese docstring para el motivo: testeable
+    directamente con pytest sin necesitar un contexto de sesión Chainlit activo).
+    """
+    chat_id = cl.user_session.get("chat_id")
+    if not chat_id:
+        return
+    await _update_chat_permission_mode(chat_id, settings.get("permission_mode"))
+
+
+async def _update_chat_permission_mode(chat_id: str, new_mode: object) -> Chat | None:
+    """`PATCH /api/chats/{id}` real (vía `app.routers.chats.patch_chat`, punto 6 del docstring
+    del módulo) -- única vía de escritura de `Chat.permission_mode` (spec-015): el LLM no tiene
+    ningún mecanismo para llegar acá, y esta función jamás se invoca fuera de una acción humana
+    explícita (`@cl.on_settings_update`/tests).
+
+    Separada de `on_settings_update` para poder testearla con pytest sin `cl.user_session` (que
+    requiere un contexto de sesión Chainlit real, inexistente en un test unitario). Devuelve
+    `None` (sin excepción) si `new_mode` no es un valor válido del enum cerrado o si `chat_id`
+    no existe -- silencioso a propósito porque `cl.ChatSettings` ya restringe los valores
+    posibles del lado del widget; un valor inesperado acá solo puede venir de un cliente
+    Chainlit desincronizado, no de una acción de usuario legítima.
+    """
+    if not isinstance(new_mode, str) or new_mode not in PERMISSION_MODE_VALUES:
+        return None
+    db = SessionLocal()
+    try:
+        try:
+            return patch_chat(
+                chat_id, ChatPatch(permission_mode=new_mode), db=db, current_user=get_current_user()
+            )
+        except HTTPException:
+            return None
+    finally:
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -222,13 +363,14 @@ async def on_new_project(action: cl.Action) -> None:
         db.commit()
         db.refresh(case)
 
-        cl.user_session.set("case_id", case.id)
-        cl.user_session.set("conversation_history", [])
-
-        await _refresh_sidebar(db, case.id)
+        chat = await _activate_case(db, case)
+        permission_mode = chat.permission_mode
     finally:
         db.close()
 
+    # El selector se resetea con el chat nuevo -- default `manual` (spec-015, "el selector
+    # muestra Manual por default" para un chat todavía no creado / recién creado).
+    await _permission_mode_settings(permission_mode).send()
     await cl.Message(content=f"Proyecto `{case.name}` creado y activado.").send()
 
 
@@ -246,15 +388,16 @@ async def on_switch_project(action: cl.Action) -> None:
             await cl.Message(content="Ese proyecto ya no existe.").send()
             return
 
-        cl.user_session.set("case_id", case.id)
         # TODO(spec-017, `CaseTurn`): reponer el historial persistido de este proyecto en vez
         # de arrancar en blanco -- ese modelo todavía no existe (ver plan de sidebar, Fase 1).
-        cl.user_session.set("conversation_history", [])
-
-        await _refresh_sidebar(db, case.id)
+        chat = await _activate_case(db, case)
+        permission_mode = chat.permission_mode
     finally:
         db.close()
 
+    # Cambiar de chat resetea el selector al `permission_mode` REAL de ese chat -- nunca
+    # arrastra el valor del chat anterior (spec-015, selector es por-chat, no global).
+    await _permission_mode_settings(permission_mode).send()
     await cl.Message(content=f"Proyecto activo: `{case.name}`.").send()
 
 
@@ -427,6 +570,190 @@ async def _maybe_offer_approval_actions(tool_calls: list[ToolCallRecord]) -> Non
             ).send()
 
 
+# ---------------------------------------------------------------------------
+# ToolRun pendiente de aprobación (spec-015): render + actions tipadas de aprobar/editar/
+# rechazar. Nunca se resuelve una aprobación por texto libre (regla 4) -- solo por estas tres
+# `cl.Action`, o nada en absoluto para `permission_mode_snapshot == "manual"`.
+# ---------------------------------------------------------------------------
+
+
+def _tool_run_code_block(tool_run: ToolRun) -> str:
+    """Bloque de código fenced con `command_resuelto` -- NUNCA el texto descriptivo de
+    `ToolCatalogEntry.actions[].command` (spec-015: "Un ToolRun nunca se muestra con el texto
+    crudo de actions[].command; solo command_resuelto"). Copiable tal cual desde el chat.
+    """
+    return f"`{tool_run.tool_key}` / `{tool_run.action_id}`\n```\n{tool_run.command_resuelto}\n```"
+
+
+async def _render_pending_tool_run(tool_run: ToolRun) -> None:
+    """Renderiza un `ToolRun` recién propuesto (`status == "proposed"`).
+
+    `permission_mode_snapshot == "manual"`: solo bloque de código, SIN ninguna `cl.Action` (el
+    backend nunca ejecuta en este modo). Cualquier otro snapshot (`accept_edit`, o `auto`
+    degradado -- ver `degraded` abajo, mismo criterio que
+    `app/agentic_core/loop.py::_pending_approval_text`): ofrece
+    `approve_tool_run`/`edit_and_approve_tool_run`/`reject_tool_run`, con un aviso explícito y
+    distinguible si es el caso degradado (spec-015: "badge/aviso explícito distinguible del
+    accept_edit normal").
+    """
+    body = _tool_run_code_block(tool_run)
+
+    if tool_run.permission_mode_snapshot == "manual":
+        await cl.Message(
+            content=(
+                "El agente propuso ejecutar un comando, pero este chat está en modo "
+                "`manual`: nunca se ejecuta automáticamente. Copiá el comando de abajo y "
+                "corrélo vos mismo si corresponde.\n\n" + body
+            )
+        ).send()
+        return
+
+    degraded = tool_run.permission_mode_snapshot == "auto"
+    degraded_note = (
+        "\n\n**Modo Auto, pero esta propuesta puntual requiere tu aprobación** (origen no "
+        "verificado como turno humano explícito -- spec-005/spec-015 -- se degradó a "
+        "aprobación manual por seguridad)."
+        if degraded
+        else ""
+    )
+    mode_label = "accept_edit (degradado desde auto)" if degraded else tool_run.permission_mode_snapshot
+    await cl.Message(
+        content=(
+            f"El agente propuso ejecutar un comando. Modo `{mode_label}`: aprobalo, editalo o "
+            f"rechazalo antes de que corra.{degraded_note}\n\n{body}"
+        ),
+        actions=[
+            cl.Action(
+                name="approve_tool_run",
+                payload={"tool_run_id": tool_run.id},
+                label="Aprobar",
+            ),
+            cl.Action(
+                name="edit_and_approve_tool_run",
+                payload={"tool_run_id": tool_run.id},
+                label="Editar y aprobar",
+            ),
+            cl.Action(
+                name="reject_tool_run",
+                payload={"tool_run_id": tool_run.id},
+                label="Rechazar",
+            ),
+        ],
+    ).send()
+
+
+async def _render_tool_run_result(tool_run: ToolRun) -> None:
+    """Estado terminal de un `ToolRun` ya resuelto (`executed`/`failed`/`rejected`) tras un
+    click en una de las Actions de `_render_pending_tool_run`.
+    """
+    if tool_run.status == "rejected":
+        await cl.Message(content=f"ToolRun `{tool_run.id}` rechazado. No se ejecutó nada.").send()
+        return
+    if tool_run.status == "executed":
+        stderr_block = f"\n\nstderr:\n```\n{tool_run.stderr}\n```" if tool_run.stderr else ""
+        await cl.Message(
+            content=(
+                f"ToolRun `{tool_run.id}` ejecutado (exit_code={tool_run.exit_code}).\n\n"
+                f"```\n{tool_run.stdout or ''}\n```{stderr_block}"
+            )
+        ).send()
+        return
+    if tool_run.status == "failed":
+        await cl.Message(
+            content=(
+                f"ToolRun `{tool_run.id}` falló: código `{tool_run.error_code}` -- "
+                f"{tool_run.error_detail or 'sin detalle adicional.'}"
+            )
+        ).send()
+        return
+    # Estado no terminal inesperado (defensivo, no debería alcanzarse: `patch_tool_run` solo
+    # devuelve approved->executed/failed o rejected).
+    await cl.Message(content=f"ToolRun `{tool_run.id}` en estado `{tool_run.status}`.").send()
+
+
+async def _patch_tool_run_action(
+    tool_run_id: str, new_status: str, *, command_resuelto: str | None = None
+) -> ToolRun | None:
+    """`PATCH /api/tool-runs/{id}` real (vía `app.routers.tool_runs.patch_tool_run`, punto 6
+    del docstring del módulo) -- única forma en que esta UI transiciona un `ToolRun` de
+    `proposed` a `approved`/`rejected`. Separada de los `@cl.action_callback` de abajo para ser
+    testeable con pytest sin depender de un `cl.Action` real.
+    """
+    db = SessionLocal()
+    try:
+        try:
+            payload = ToolRunPatch(status=new_status, command_resuelto=command_resuelto)
+            return patch_tool_run(tool_run_id, payload, db=db, current_user=get_current_user())
+        except HTTPException as exc:
+            detail = exc.detail.get("detail") if isinstance(exc.detail, dict) else exc.detail
+            await cl.Message(
+                content=f"No se pudo procesar la acción sobre el ToolRun `{tool_run_id}`: {detail}"
+            ).send()
+            return None
+    finally:
+        db.close()
+
+
+@cl.action_callback("approve_tool_run")
+async def on_approve_tool_run(action: cl.Action) -> None:
+    tool_run_id = (action.payload or {}).get("tool_run_id")
+    if not tool_run_id:
+        await cl.Message(content="Acción inválida: falta `tool_run_id` en el payload.").send()
+        return
+    tool_run = await _patch_tool_run_action(tool_run_id, "approved")
+    if tool_run is None:
+        return
+    await action.remove()
+    await _render_tool_run_result(tool_run)
+
+
+@cl.action_callback("reject_tool_run")
+async def on_reject_tool_run(action: cl.Action) -> None:
+    tool_run_id = (action.payload or {}).get("tool_run_id")
+    if not tool_run_id:
+        await cl.Message(content="Acción inválida: falta `tool_run_id` en el payload.").send()
+        return
+    tool_run = await _patch_tool_run_action(tool_run_id, "rejected")
+    if tool_run is None:
+        return
+    await action.remove()
+    await _render_tool_run_result(tool_run)
+
+
+@cl.action_callback("edit_and_approve_tool_run")
+async def on_edit_and_approve_tool_run(action: cl.Action) -> None:
+    """Edita `command_resuelto` antes de aprobar, vía `cl.AskUserMessage` -- mismo patrón que
+    ya usa `on_new_project` para pedir texto libre al usuario (punto 8 del docstring del
+    módulo). El texto editado queda persistido solo para auditoría/visualización: la ejecución
+    real siempre re-resuelve el `argv` desde `(tool_key, action_id, params_json)` vía la
+    allowlist (spec-015, punto 1) -- nunca desde este texto (ver
+    `app/routers/tool_runs.py::patch_tool_run`).
+    """
+    tool_run_id = (action.payload or {}).get("tool_run_id")
+    if not tool_run_id:
+        await cl.Message(content="Acción inválida: falta `tool_run_id` en el payload.").send()
+        return
+
+    response = await cl.AskUserMessage(
+        content=(
+            "Pegá el comando editado (queda guardado para auditoría; la ejecución real "
+            "siempre re-resuelve los parámetros originales contra la allowlist, spec-015 "
+            "punto 1 -- este texto es solo lo que se muestra)."
+        ),
+        timeout=120,
+    ).send()
+    edited = (response or {}).get("output", "").strip() if response else ""
+    if not edited:
+        await cl.Message(content="Edición cancelada (sin texto).").send()
+        return
+
+    tool_run = await _patch_tool_run_action(tool_run_id, "approved", command_resuelto=edited)
+    if tool_run is None:
+        return
+    await action.remove()
+    await _render_tool_run_result(tool_run)
+
+
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
     """Procesa un mensaje del usuario delegando por completo en `run_agent_turn`.
@@ -439,9 +766,17 @@ async def on_message(message: cl.Message) -> None:
     conexiones SQLite de larga vida asociadas a una sesión de usuario que puede quedar
     inactiva por horas; el costo de reabrir la sesión en cada mensaje es despreciable para
     SQLite local. `run_agent_turn` recibe esa sesión y la reenvía tal cual a `create_finding`.
+
+    `chat_id` (spec-015, Task 13): `run_agent_turn` lo requiere desde la Task 12 -- ver punto 8
+    del docstring del módulo -- para resolver `Chat.permission_mode` y, si un `tool_call`
+    resuelve a una tool con `command` real, pausar el turno (`AgentTurnResult.
+    pending_tool_run_id`) en vez de ejecutar sin gate humano. Ese `ToolRun` se renderiza acá
+    con `_render_pending_tool_run` DESPUÉS del resto del turno (Steps + respuesta final), nunca
+    antes -- mismo orden que ya usa `_maybe_offer_approval_actions` para hallazgos/informes.
     """
     conversation_history: list[dict] = cl.user_session.get("conversation_history") or []
     case_id: str = cl.user_session.get("case_id")
+    chat_id: str = cl.user_session.get("chat_id")
 
     db = SessionLocal()
     try:
@@ -450,7 +785,13 @@ async def on_message(message: cl.Message) -> None:
         # `app/tools/create_finding.py`) -- lo inyecta `_dispatch_create_finding` a partir de
         # esto, threadeado por `run_agent_turn`.
         result: AgentTurnResult = await run_agent_turn(
-            message.content, conversation_history, db, case_id=case_id
+            message.content, conversation_history, db, chat_id=chat_id, case_id=case_id
+        )
+        # Se resuelve DENTRO del bloque `db` abierto (mismo criterio que `_resolve_finding_action`
+        # usa para `finding`/`report`: el objeto ORM ya cargado sigue siendo legible después de
+        # `db.close()`, ver ese comentario más abajo en el módulo para el patrón establecido).
+        pending_tool_run = (
+            db.get(ToolRun, result.pending_tool_run_id) if result.pending_tool_run_id else None
         )
     finally:
         db.close()
@@ -479,6 +820,9 @@ async def on_message(message: cl.Message) -> None:
                 "explícitamente que continúe en un nuevo mensaje."
             )
         ).send()
+
+    if pending_tool_run is not None:
+        await _render_pending_tool_run(pending_tool_run)
 
     await _maybe_offer_approval_actions(result.tool_calls)
 

@@ -8,12 +8,16 @@ import type {
   CaseTool,
   ChatMessage,
   ChatSummary,
+  PermissionMode,
   Project,
   ProjectTool,
   Report,
   ToolAction,
   ToolCatalogEntry,
   ToolCatalogEntryDraft,
+  ToolRun,
+  ToolRunErrorCode,
+  ToolRunStatus,
 } from "@/types/domain";
 
 // ---------------------------------------------------------------------------
@@ -71,11 +75,19 @@ interface ChatApi {
   case_id: string | null;
   title: string | null;
   archived: boolean;
+  permission_mode: PermissionMode;
   updated_at: string;
 }
 
 function toChatSummary(c: ChatApi): ChatSummary {
-  return { id: c.id, caseId: c.case_id, title: c.title, archived: c.archived, updatedAt: c.updated_at };
+  return {
+    id: c.id,
+    caseId: c.case_id,
+    title: c.title,
+    archived: c.archived,
+    permissionMode: c.permission_mode,
+    updatedAt: c.updated_at,
+  };
 }
 
 interface MessageApi {
@@ -142,12 +154,107 @@ export async function archiveChat(id: string): Promise<ChatSummary> {
   return toChatSummary(updated);
 }
 
-export async function postMessage(chatId: string, content: string): Promise<ChatMessage[]> {
-  const result = await apiFetch<{ messages: MessageApi[] }>(`/chats/${chatId}/messages`, {
-    method: "POST",
-    body: JSON.stringify({ content }),
+// `permission_mode` (spec-015) es exclusivamente mutable por una acción humana -- el selector
+// del header de `ChatRoute.tsx` es el único caller de esta función. Se reusa el mismo `PATCH
+// /api/chats/{id}` que `archiveChat`/renombrar título (nunca un endpoint dedicado).
+export async function updateChatPermissionMode(chatId: string, mode: PermissionMode): Promise<ChatSummary> {
+  const updated = await apiFetch<ChatApi>(`/chats/${chatId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ permission_mode: mode }),
   });
-  return result.messages.map(toChatMessage);
+  return toChatSummary(updated);
+}
+
+export interface PostMessageResult {
+  messages: ChatMessage[];
+  // Espejo de `ChatTurnResponse.pending_tool_run_id` (spec-015, Task 13): no-`null` cuando el
+  // turno quedó pausado esperando aprobación humana de un `ToolRun`. `ChatRoute.tsx` lo usa
+  // para pedir ese `ToolRun` puntual sin tener que hacer un `GET .../tool-runs?status=proposed`
+  // extra en el caso común.
+  pendingToolRunId: string | null;
+}
+
+export async function postMessage(chatId: string, content: string): Promise<PostMessageResult> {
+  const result = await apiFetch<{ messages: MessageApi[]; pending_tool_run_id: string | null }>(
+    `/chats/${chatId}/messages`,
+    { method: "POST", body: JSON.stringify({ content }) },
+  );
+  return {
+    messages: result.messages.map(toChatMessage),
+    pendingToolRunId: result.pending_tool_run_id ?? null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ToolRun (spec-015): propuestas de ejecución de comandos reales, gateadas por
+// `Chat.permission_mode`. Consumido por `components/chat/ToolRunCard.tsx`.
+// ---------------------------------------------------------------------------
+
+interface ToolRunApi {
+  id: string;
+  chat_id: string;
+  tool_key: string;
+  action_id: string;
+  command_resuelto: string;
+  permission_mode_snapshot: string;
+  status: ToolRunStatus;
+  triggered_by: "human" | "llm";
+  resolved_by: string | null;
+  error_code: ToolRunErrorCode | null;
+  error_detail: string | null;
+  exit_code: number | null;
+  stdout: string | null;
+  stderr: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function toToolRun(t: ToolRunApi): ToolRun {
+  return {
+    id: t.id,
+    chatId: t.chat_id,
+    toolKey: t.tool_key,
+    actionId: t.action_id,
+    commandResuelto: t.command_resuelto,
+    // `permission_mode_snapshot` es un snapshot histórico (spec-015): siempre uno de los tres
+    // valores de `PermissionMode` en la práctica, pero el backend lo tipa como `str` suelto
+    // (`app/models/tool_run.py`) -- se castea acá, nunca se revalida contra el enum.
+    permissionModeSnapshot: t.permission_mode_snapshot as PermissionMode,
+    status: t.status,
+    triggeredBy: t.triggered_by,
+    resolvedBy: t.resolved_by,
+    errorCode: t.error_code,
+    errorDetail: t.error_detail,
+    exitCode: t.exit_code,
+    stdout: t.stdout,
+    stderr: t.stderr,
+    createdAt: t.created_at,
+    updatedAt: t.updated_at,
+  };
+}
+
+// `status` opcional -- sin filtro trae todos los `ToolRun` del chat (más recientes primero,
+// ver `GET /api/chats/{chat_id}/tool-runs` en `app/routers/tool_runs.py`).
+export async function getToolRuns(chatId: string, status?: ToolRunStatus): Promise<ToolRun[]> {
+  const qs = status ? `?status=${status}` : "";
+  const rows = await apiFetch<ToolRunApi[]>(`/chats/${chatId}/tool-runs${qs}`);
+  return rows.map(toToolRun);
+}
+
+// `PATCH /api/tool-runs/{id}` -- única forma en que un humano aprueba/rechaza un `ToolRun`
+// (`status=proposed` es el único origen válido, ver `VALID_TOOL_RUN_PATCH_TRANSITIONS`).
+// `commandResuelto` editado es opcional: si se omite, se aprueba/rechaza tal cual se propuso.
+export async function resolveToolRun(
+  id: string,
+  patch: { status: "approved" | "rejected"; commandResuelto?: string },
+): Promise<ToolRun> {
+  const body: Record<string, unknown> = { status: patch.status };
+  if (patch.commandResuelto !== undefined) body.command_resuelto = patch.commandResuelto;
+  const updated = await apiFetch<ToolRunApi>(`/tool-runs/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  return toToolRun(updated);
 }
 
 // ---------------------------------------------------------------------------
